@@ -334,3 +334,6 @@ tr.row-short td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 
 .idle-cars { margin-top: 16px; }
 .notice .btn { text-decoration: none; }
+
+.import-preview.tall { max-height: 380px; }
+.import-preview td.wrap { min-width: 180px; max-width: 280px; white-space: normal; }

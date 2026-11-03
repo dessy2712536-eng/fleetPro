@@ -4,6 +4,7 @@ import { useApp } from '../context';
 import { PageHead, ResourceTable } from '../ui';
 import ImportVehicles from './ImportVehicles';
 import AssignManager from './AssignManager';
+import ImportDrivers from './ImportDrivers';
 import { checkinsCfg, contractsCfg, driversCfg, expensesCfg, fuelCfg, paymentsCfg, recordsCfg, schedulesCfg, tripsCfg, vehiclesCfg } from '../resources';
 
 export function VehiclesPage() {
@@ -48,7 +49,21 @@ export function VehiclesPage() {
 
 export function DriversPage() {
   const app = useApp();
-  return <><PageHead title="Drivers" sub="Each driver's manager, car, amount owing and latest feedback." /><ResourceTable cfg={driversCfg(app)} /></>;
+  const [importing, setImporting] = useState(false);
+  const [version, setVersion] = useState(0);
+  return (
+    <>
+      <PageHead title="Drivers" sub="Each driver's manager, car, amount owing and latest feedback.">
+        {app.can('manager') && <button className="btn ghost" onClick={() => setImporting(true)}>Import drivers</button>}
+      </PageHead>
+      <ResourceTable key={version} cfg={driversCfg(app)} />
+      {importing && (
+        <ImportDrivers
+          onClose={() => setImporting(false)}
+          onDone={(d, c) => { setVersion(v => v + 1); if (d || c) app.notify(`${d} driver${d === 1 ? '' : 's'} added, ${c} given a car`); }} />
+      )}
+    </>
+  );
 }
 
 export function ContractsPage() {

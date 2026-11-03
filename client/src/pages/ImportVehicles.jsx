@@ -25,7 +25,7 @@ const DATE_FIELDS = ['insurance_expiry', 'roadworthy_expiry', 'registration_expi
 const LABELS = { insurance_expiry: 'Insurance expiry', roadworthy_expiry: 'Roadworthy expiry', registration_expiry: 'Registration expiry', purchase_date: 'Purchase date' };
 
 /** Excel date, "31/12/2026", "2026-12-31" or "31 Dec 2026" → "2026-12-31". Returns undefined if unreadable. */
-function toISODate(v) {
+export function toISODate(v) {
   if (v == null || v === '') return null;
   const pad = n => String(n).padStart(2, '0');
   if (v instanceof Date && !isNaN(v)) return `${v.getUTCFullYear()}-${pad(v.getUTCMonth() + 1)}-${pad(v.getUTCDate())}`;
@@ -75,7 +75,7 @@ export async function downloadTemplate() {
 }
 const EV_MAKES = /cerio|byd/i;
 
-function splitLine(line, delim) {
+export function splitLine(line, delim) {
   if (delim === '\t') return line.split('\t').map(s => s.trim());
   // simple CSV with quotes
   const out = []; let cur = ''; let q = false;
