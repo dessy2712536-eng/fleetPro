@@ -4,5 +4,5 @@
 // It looks like: https://script.google.com/macros/s/AKfy.../exec
 // ─────────────────────────────────────────────────────────────
 window.FLEETPRO_CONFIG = {
-  apiUrl: '',
+  apiUrl: 'https://script.google.com/macros/s/AKfycbyaUK4OCdetY9RAfGjiqvp2XEEKEPlEyJ4XAbsfuBZSUZCDWuEveN0bhXOjzV4E7PNOVg/exec',
 };
