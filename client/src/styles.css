@@ -318,3 +318,12 @@ tr.row-short td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 .import-progress { padding: 8px 0; }
 .import-progress ul { margin: 6px 0 0; padding-left: 18px; font-weight: 400; }
 .progress.big { height: 12px; margin: 8px 0; }
+
+.import-steps { margin: 0 0 14px; padding-left: 1.3em; display: flex; flex-direction: column; gap: 14px; }
+.import-steps li > div { margin-top: 8px; }
+.upload-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.file-btn { position: relative; display: inline-block; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.file-btn:focus-within { outline: 3px solid var(--hivis); outline-offset: 2px; }
+.paste-instead { margin: 4px 0 8px; }
+.paste-instead summary { cursor: pointer; color: var(--info); font-weight: 500; margin-bottom: 8px; }

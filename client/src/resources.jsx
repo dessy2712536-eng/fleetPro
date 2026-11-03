@@ -14,7 +14,7 @@ export const vehiclesCfg = ({ dist }) => ({
     { name: 'type', label: 'Type', options: VEHICLE_TYPES },
   ],
   columns: [
-    { key: 'reg_number', label: 'Vehicle', sort: 'reg_number', render: r => <Plate to={`/vehicles/${r.id}`}>{r.reg_number}</Plate> },
+    { key: 'reg_number', label: 'Car', sort: 'reg_number', render: r => <Plate to={`/vehicles/${r.id}`}>{r.reg_number}</Plate> },
     { key: 'make', label: 'Make & model', sort: 'make', render: r => <><strong>{r.make} {r.model}</strong><div className="dim">{r.year || ''} {human(r.type)} · {human(r.fuel_type)}</div></> },
     { key: 'driver_name', label: 'Assigned driver', render: r => r.driver_name || <span className="dim">Unassigned</span> },
     { key: 'current_odometer', label: 'Odometer', num: true, sort: 'current_odometer', render: r => dist(r.current_odometer) },
