@@ -71,7 +71,7 @@ export function useOptions(kind) {
       })[kind]();
       cache[kind] = r.rows.map(x => ({
         value: x.id, label: label(x),
-        vehicle_id: x.vehicle_id, status: x.status, daily_rate: x.daily_rate, type: x.type, contract_id: x.contract_id, next_unpaid_day: x.next_unpaid_day,
+        vehicle_id: x.vehicle_id, status: x.status, daily_rate: x.daily_rate, type: x.type, contract_id: x.contract_id, next_unpaid_day: x.next_unpaid_day, manager_id: x.manager_id,
       })).sort((a, b) => (kind === 'contract' ? (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1) : 0) || a.label.localeCompare(b.label));
       setOpts(cache[kind]);
     }).catch(() => {});
@@ -79,13 +79,15 @@ export function useOptions(kind) {
   return opts;
 }
 
-function RefSelect({ kind, value, onChange, filterVehicle, ...rest }) {
+function RefSelect({ kind, value, onChange, filterVehicle, onlyManager, onlyFree, ...rest }) {
   let opts = useOptions(kind);
+  if (onlyManager !== undefined) opts = opts.filter(o => o.manager_id === onlyManager || o.value === value);
+  if (onlyFree) opts = opts.filter(o => (!o.contract_id && o.status === 'active') || o.value === value);
   if (kind === 'schedule' && filterVehicle) opts = opts.filter(o => o.vehicle_id === Number(filterVehicle));
   if (kind === 'contract') opts = opts.filter(o => o.status === 'active' || o.value === value);
   return (
     <select value={value ?? ''} onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} {...rest}>
-      <option value="">{kind === 'schedule' ? 'Not linked to a schedule' : kind === 'manager' ? 'No manager' : kind === 'contract' ? 'Select driver…' : `Select ${kind}…`}</option>
+      <option value="">{onlyFree && opts.length === 0 ? 'No free drivers in this group – add a driver first' : kind === 'schedule' ? 'Not linked to a schedule' : kind === 'manager' ? (rest.required ? 'Select manager…' : 'No manager') : kind === 'contract' ? 'Select driver…' : `Select ${kind}…`}</option>
       {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );
@@ -105,7 +107,7 @@ export function Field({ f, value, onChange, error, form }) {
       );
       break;
     case 'vehicle': case 'driver': case 'schedule': case 'contract': case 'manager':
-      input = <RefSelect {...common} kind={f.type} value={value} onChange={onChange} filterVehicle={form?.vehicle_id} />;
+      input = <RefSelect {...common} kind={f.type} value={value} onChange={onChange} filterVehicle={form?.vehicle_id} onlyManager={f.onlyManager} onlyFree={f.onlyFree} />;
       break;
     case 'textarea':
       input = <textarea {...common} rows={3} value={value ?? ''} onChange={e => onChange(e.target.value)} />;

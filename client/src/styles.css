@@ -327,3 +327,10 @@ tr.row-short td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 .file-btn:focus-within { outline: 3px solid var(--hivis); outline-offset: 2px; }
 .paste-instead { margin: 4px 0 8px; }
 .paste-instead summary { cursor: pointer; color: var(--info); font-weight: 500; margin-bottom: 8px; }
+
+.notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: var(--radius); margin-bottom: 14px; border: 1px solid; }
+.notice.warn { background: #FFF5D6; border-color: #F0D68A; color: #5C4300; }
+.manager-pick { margin: 12px 0 0; }
+
+.idle-cars { margin-top: 16px; }
+.notice .btn { text-decoration: none; }

@@ -22,12 +22,13 @@ export function VehicleDetail() {
   const [summary, setSummary] = useState(null);
   const [tab, setTab] = useState('contracts');
   const [editing, setEditing] = useState(false);
+  const [giving, setGiving] = useState(false);
 
   const loadSummary = useCallback(() => api(`/vehicles/${id}/summary`).then(setSummary).catch(() => {}), [id]);
   useEffect(() => { loadSummary(); }, [loadSummary]);
   const refresh = () => { load(); loadSummary(); };
 
-  if (error) return <div className="form-error">{error} <Link to="/vehicles">Back to vehicles</Link></div>;
+  if (error) return <div className="form-error">{error} <Link to="/vehicles">Back to cars</Link></div>;
   if (!v) return <div className="loading">Loading…</div>;
 
   const cfg = vehiclesCfg(app);
@@ -45,18 +46,18 @@ export function VehicleDetail() {
 
   const save = async form => {
     await api(`/vehicles/${id}`, { method: 'PUT', body: form });
-    notify('Vehicle updated'); setEditing(false); invalidateOptions(); refresh();
+    notify('Car updated'); setEditing(false); invalidateOptions(); refresh();
   };
   const remove = async () => {
     if (!window.confirm(`Delete ${v.reg_number} and all its trips, fuel, maintenance and expense records? Consider marking it "Disposed" instead to keep its history.`)) return;
     await api(`/vehicles/${id}`, { method: 'DELETE' });
-    notify('Vehicle deleted'); invalidateOptions(); navigate('/vehicles');
+    notify('Car deleted'); invalidateOptions(); navigate('/vehicles');
   };
 
   return (
     <>
       <div className="detail-head">
-        <Link to="/vehicles" className="back">Vehicles</Link>
+        <Link to="/vehicles" className="back">Cars</Link>
         <div className="detail-title">
           <Plate>{v.reg_number}</Plate>
           <div>
@@ -65,9 +66,13 @@ export function VehicleDetail() {
           </div>
           <Badge value={v.status} />
           <span className="spacer" />
-          {can('manager') && <button className="btn ghost" onClick={() => setEditing(true)}>Edit vehicle</button>}
+          {can('manager') && !v.assigned_driver_id && ['active', 'inactive', 'in_maintenance'].includes(v.status) && (
+            <button className="btn primary" onClick={() => setGiving(true)} disabled={!v.manager_id} title={v.manager_id ? '' : 'Assign a manager first'}>Assign driver</button>
+          )}
+          {can('manager') && <button className="btn ghost" onClick={() => setEditing(true)}>Edit car</button>}
         </div>
       </div>
+      {!v.manager_id && <div className="notice warn"><span><strong>This car has no manager.</strong> Edit the car to choose one before giving it to a driver.</span></div>}
 
       {summary?.alerts?.length > 0 && (
         <ul className="alert-list inline">
@@ -77,6 +82,7 @@ export function VehicleDetail() {
 
       <div className="facts">
         <dl>
+          <div><dt>Manager</dt><dd>{v.manager_name || <span className="txt-bad">No manager</span>}</dd></div>
           <div><dt>Odometer</dt><dd>{dist(v.current_odometer)}</dd></div>
           <div><dt>Driver</dt><dd>{v.assigned_driver_id ? <Link to={`/drivers/${v.assigned_driver_id}`}>{v.driver_name}</Link> : 'Unassigned'}</dd></div>
           <div><dt>Insurance</dt><dd><ExpiryCell date={v.insurance_expiry} /></dd></div>
@@ -99,6 +105,21 @@ export function VehicleDetail() {
       </div>
       <ResourceTable key={tab} cfg={tabs[tab][1]} fixed={{ vehicle_id: Number(id) }} embedded onChanged={refresh} />
 
+      {giving && (() => {
+        const cc = contractsCfg(app);
+        const fields = cc.fields.filter(f => f.name !== 'vehicle_id').map(f => f.name === 'driver_id' ? { ...f, onlyManager: v.manager_id, onlyFree: true, hint: `Active drivers in ${v.manager_name || 'this car\'s manager'}'s group who don't have a car` } : f);
+        return (
+          <Modal title={`Assign a driver to ${v.reg_number}`} onClose={() => setGiving(false)} wide>
+            <RecordForm fields={fields}
+              initial={{ ...cc.defaults(), vehicle_id: v.id, type: /cerio|cireo|byd/i.test(v.make) ? 'daily_hire' : 'work_and_pay' }}
+              onSubmit={async f => {
+                await api('/contracts', { method: 'POST', body: { ...f, vehicle_id: v.id } });
+                notify(`${v.reg_number} assigned`); setGiving(false); invalidateOptions(); refresh(); setTab('contracts');
+              }}
+              onCancel={() => setGiving(false)} submitLabel="Start contract" />
+          </Modal>
+        );
+      })()}
       {editing && (
         <Modal title={`Edit ${v.reg_number}`} onClose={() => setEditing(false)} wide>
           <RecordForm fields={cfg.fields} initial={Object.fromEntries(cfg.fields.map(f => [f.name, v[f.name]]))} onSubmit={save} onCancel={() => setEditing(false)} submitLabel="Save changes" />

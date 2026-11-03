@@ -61,6 +61,7 @@ const FIELDS = {
     roadworthy_expiry: { type: 'date' },
     registration_expiry: { type: 'date' },
     assigned_driver_id: driverRef,
+    manager_id: { type: 'ref', table: 'users', label: 'manager', required: true },
     notes: { type: 'string', max: 2000 },
   },
   trips: {
@@ -537,7 +538,10 @@ function addYears(dateStr, years) {
 }
 
 const VIEWS = {
-  vehicles: (r, m) => Object.assign({}, r, { driver_name: m.d[r.assigned_driver_id] ? m.d[r.assigned_driver_id].name : null }),
+  vehicles: (r, m) => Object.assign({}, r, {
+    driver_name: m.d[r.assigned_driver_id] ? m.d[r.assigned_driver_id].name : null,
+    manager_name: m.u[r.manager_id] ? m.u[r.manager_id].name : null,
+  }),
   drivers: (r, m) => {
     const c = m.activeByDriver[r.id];
     const st = c ? contractStats(c, m.pay[c.id]) : null;
@@ -616,10 +620,17 @@ function bumpOdometer(vehicleId, reading) {
 
 const RESOURCES = {
   vehicles: {
-    table: 'vehicles', entity: 'Vehicle',
-    search: ['reg_number', 'make', 'model', 'vin', 'driver_name'],
-    filters: { status: 'status', type: 'type', fuel_type: 'fuel_type', driver_id: 'assigned_driver_id' },
-    sortable: ['reg_number', 'make', 'year', 'current_odometer', 'status'],
+    table: 'vehicles', entity: 'Car',
+    // Moving a car to another manager moves its current driver too, so they stay in one group.
+    afterWrite: (row, prev) => {
+      if (!prev || prev.manager_id === row.manager_id || !row.manager_id) return;
+      readAll('contracts').filter(c => c.vehicle_id === row.id && c.status === 'active')
+        .forEach(c => updateWhere('drivers', d => d.id === c.driver_id && d.manager_id !== row.manager_id, { manager_id: row.manager_id }));
+    },
+    search: ['reg_number', 'make', 'model', 'vin', 'driver_name', 'manager_name'],
+    filters: { status: 'status', type: 'type', fuel_type: 'fuel_type', driver_id: 'assigned_driver_id', manager_id: 'manager_id' },
+    sortable: ['reg_number', 'make', 'year', 'current_odometer', 'status', 'manager_name'],
+    check: d => { requireManagerUser(d.manager_id); },
     defaultSort: ['reg_number', 'asc'],
     unique: 'reg_number',
     describe: r => `${r.reg_number} (${r.make} ${r.model})`,
@@ -632,11 +643,18 @@ const RESOURCES = {
   },
   drivers: {
     table: 'drivers', entity: 'Driver',
+    // Moving a driver to another manager moves the car they are driving too.
+    afterWrite: (row, prev) => {
+      if (!prev || prev.manager_id === row.manager_id || !row.manager_id) return;
+      readAll('contracts').filter(c => c.driver_id === row.id && c.status === 'active')
+        .forEach(c => updateWhere('vehicles', v => v.id === c.vehicle_id && v.manager_id !== row.manager_id, { manager_id: row.manager_id }));
+    },
     search: ['name', 'phone', 'momo_number', 'email', 'license_number', 'reg_number', 'manager_name'],
     filters: { status: 'status', manager_id: 'manager_id', intention: 'intention' },
     sortable: ['name', 'license_expiry', 'status', 'arrears', 'manager_name'],
     defaultSort: ['name', 'asc'],
     describe: r => r.name,
+    check: d => { requireManagerUser(d.manager_id); },
     beforeDelete: id => {
       if (readAll('contracts').some(c => c.driver_id === id)) throw new HttpError(409, 'This driver has contract and payment history. Set their status to Stopped instead of deleting them.');
     },
@@ -754,6 +772,13 @@ Object.assign(RESOURCES, {
         if (drv && drv.status === 'stopped') throw invalid('driver_id', 'This driver is marked Stopped. Change their status first.');
       }
       if (d.end_date && d.start_date && d.end_date < d.start_date) throw invalid('end_date', 'Must be after the start date');
+      {
+        const car = findById('vehicles', d.vehicle_id), drv = findById('drivers', d.driver_id);
+        if (car && drv && car.manager_id && drv.manager_id && car.manager_id !== drv.manager_id) {
+          const name = id => (findById('users', id) || {}).name || 'another manager';
+          throw invalid('driver_id', `This car is in ${name(car.manager_id)}'s group but the driver is in ${name(drv.manager_id)}'s. Move one of them so they match.`);
+        }
+      }
       if (d.type === 'work_and_pay') {
         const min = Number(st.deposit_min) || 0, newCar = Number(st.deposit_new_car) || 0;
         if (d.deposit_amount == null) throw invalid('deposit_amount', `Work & pay needs a security deposit (from ${money(min)})`);
@@ -773,6 +798,11 @@ Object.assign(RESOURCES, {
     afterWrite: (row, prev) => {
       const v = findById('vehicles', row.vehicle_id);
       if (row.status === 'active') {
+        const drvM = findById('drivers', row.driver_id);
+        if (drvM && v) {
+          if (!drvM.manager_id && v.manager_id) updateRow('drivers', drvM.id, { manager_id: v.manager_id });
+          else if (drvM.manager_id && !v.manager_id) updateRow('vehicles', v.id, { manager_id: drvM.manager_id });
+        }
         if (v && (v.assigned_driver_id !== row.driver_id || v.status === 'inactive')) {
           updateRow('vehicles', v.id, { assigned_driver_id: row.driver_id, status: v.status === 'inactive' ? 'active' : v.status });
         }
@@ -861,6 +891,13 @@ Object.assign(RESOURCES, {
   },
 });
 
+/** A car's manager must be an active user with the Manager or Admin role. */
+function requireManagerUser(id) {
+  if (id == null) return;
+  const u = findById('users', id);
+  if (!u || !u.active || (u.role !== 'manager' && u.role !== 'admin')) throw invalid('manager_id', 'Choose a user with the Manager or Admin role');
+}
+
 function syncVehicleStatus(vehicleId) {
   const v = findById('vehicles', vehicleId);
   if (!v) return;
@@ -873,9 +910,43 @@ function syncVehicleStatus(vehicleId) {
 
 function view(res, row, m) { return VIEWS[res.table](row, m || maps()); }
 
-function list(res, q) {
+// ---------- Manager groups ----------
+// A manager sees only their own group: the cars assigned to them and the drivers under them,
+// plus everything attached to those (contracts, payments, check-ins, maintenance, expenses).
+// Admins and viewers see everything.
+
+/** The manager a user is limited to, or null for admins and viewers. */
+function scopeFor(user) { return user && user.role === 'manager' ? user.id : null; }
+
+/** Which manager to report on: managers are always limited to themselves; admins may pick one. */
+function pickManager(q, user) {
+  const own = scopeFor(user);
+  if (own) return own;
+  return q && q.manager_id && q.manager_id !== 'all' ? (Number(q.manager_id) || null) : null;
+}
+
+/** Does this record belong to manager `mid`'s group? */
+function inGroup(table, r, mid, m) {
+  if (!r) return false;
+  const carMgr = id => (m.v[id] || {}).manager_id;
+  const drvMgr = id => (m.d[id] || {}).manager_id;
+  switch (table) {
+    case 'vehicles': return r.manager_id === mid;
+    case 'drivers': return r.manager_id === mid;
+    case 'contracts': return carMgr(r.vehicle_id) === mid || drvMgr(r.driver_id) === mid;
+    case 'payments': { const c = m.c[r.contract_id]; return !!c && (carMgr(c.vehicle_id) === mid || drvMgr(c.driver_id) === mid); }
+    case 'checkins': return drvMgr(r.driver_id) === mid || (r.vehicle_id != null && carMgr(r.vehicle_id) === mid);
+    case 'trips': case 'fuel_logs': return carMgr(r.vehicle_id) === mid || (r.driver_id != null && drvMgr(r.driver_id) === mid);
+    default: return r.vehicle_id != null && carMgr(r.vehicle_id) === mid; // expenses, maintenance
+  }
+}
+
+function notInGroup(res) { return new HttpError(404, `${res.entity} not found`); }
+
+function list(res, q, user) {
   const m = maps();
-  let rows = readAll(res.table).map(r => view(res, r, m));
+  const mid = scopeFor(user);
+  let rows = readAll(res.table).filter(r => !mid || inGroup(res.table, r, mid, m)).map(r => view(res, r, m));
   if (q.q) {
     const needle = String(q.q).toLowerCase();
     rows = rows.filter(r => res.search.some(c => r[c] != null && String(r[c]).toLowerCase().indexOf(needle) >= 0));
@@ -908,11 +979,27 @@ function list(res, q) {
 
 function save(res, id, body, user) {
   requireRole(user, 'manager');
+  const mid = scopeFor(user);
   const prev = id ? findById(res.table, id) : null;
   if (id && !prev) throw new HttpError(404, `${res.entity} not found`);
+  if (mid && prev && !inGroup(res.table, prev, mid, maps())) throw notInGroup(res);
+  // A manager's new cars and drivers go into their own group.
+  if (mid && (res.table === 'vehicles' || res.table === 'drivers') && !prev && (body || {}).manager_id == null) body = Object.assign({}, body, { manager_id: mid });
   const data = validate(body || {}, FIELDS[res.table], !!id);
   if (res.prepare) res.prepare(data, prev, user);
   const merged = Object.assign({}, prev || {}, data);
+  if (mid) {
+    if ((res.table === 'vehicles' || res.table === 'drivers') && merged.manager_id !== mid) {
+      throw new HttpError(403, `You can only manage ${res.table === 'vehicles' ? 'cars' : 'drivers'} in your own group. Ask an admin to move it to another manager.`);
+    }
+    const mp = maps();
+    if (res.table !== 'vehicles' && res.table !== 'drivers' && !inGroup(res.table, merged, mid, mp)) {
+      throw new HttpError(403, 'You can only record this for your own drivers and cars.');
+    }
+    // Any car or driver a record points to must also be in the manager's own group.
+    if (merged.vehicle_id != null && (mp.v[merged.vehicle_id] || {}).manager_id !== mid) throw new HttpError(403, 'You can only use cars from your own group.');
+    if (merged.driver_id != null && (mp.d[merged.driver_id] || {}).manager_id !== mid) throw new HttpError(403, 'You can only use drivers from your own group.');
+  }
   if (res.unique && merged[res.unique]) {
     const dup = readAll(res.table).find(r => r.id !== (prev ? prev.id : -1) && String(r[res.unique]).toLowerCase() === String(merged[res.unique]).toLowerCase());
     if (dup) throw new HttpError(409, `A ${res.entity.toLowerCase()} with that value already exists`);
@@ -929,6 +1016,8 @@ function remove(res, id, user) {
   requireRole(user, 'manager');
   const row = findById(res.table, id);
   if (!row) throw new HttpError(404, `${res.entity} not found`);
+  const mid = scopeFor(user);
+  if (mid && !inGroup(res.table, row, mid, maps())) throw notInGroup(res);
   if (res.beforeDelete) res.beforeDelete(row.id);
   const described = res.describe(view(res, row));
   deleteWhere(res.table, r => r.id === row.id);
@@ -1044,10 +1133,11 @@ function computeAlerts() {
   });
 
   // Tag each alert with the responsible manager (via the driver, or the car's current driver).
+  // Driver alerts go to the driver's manager; car alerts go to the car's manager.
   alerts.forEach(a => {
-    let driverId = a.driver_id;
-    if (!driverId && a.vehicle_id && m.activeByVehicle[a.vehicle_id]) driverId = m.activeByVehicle[a.vehicle_id].driver_id;
-    a.manager_id = driverId && m.d[driverId] ? m.d[driverId].manager_id || null : null;
+    const fromDriver = a.driver_id && m.d[a.driver_id] ? m.d[a.driver_id].manager_id : null;
+    const fromCar = a.vehicle_id && m.v[a.vehicle_id] ? m.v[a.vehicle_id].manager_id : null;
+    a.manager_id = (a.category === 'payment' || a.category === 'driver' ? fromDriver || fromCar : fromCar || fromDriver) || null;
   });
 
   const rank = { overdue: 0, urgent: 1, upcoming: 2 };
@@ -1077,7 +1167,7 @@ function periodRange(period, date) {
 function managerReport(q, user) {
   const period = ['day', 'week', 'month'].indexOf(q.period) >= 0 ? q.period : 'day';
   const r = periodRange(period, q.date);
-  const managerId = q.manager_id === 'all' ? null : (Number(q.manager_id) || (user.role === 'manager' ? user.id : null));
+  const managerId = pickManager(q, user);
   const m = maps();
   const due = dueThrough();
   const settings = getSettings();
@@ -1087,8 +1177,7 @@ function managerReport(q, user) {
     if (c.start_date > r.to) return false;
     const last = contractLastDay(c);
     if (last && last < r.from) return false;
-    const d = m.d[c.driver_id];
-    return !managerId || (d && d.manager_id === managerId);
+    return !managerId || inGroup('contracts', c, managerId, m);
   });
 
   const rows = contracts.map(c => {
@@ -1143,6 +1232,12 @@ function managerReport(q, user) {
     summary: summarise(rows),
     by_manager: Object.keys(byManager).map(k => Object.assign({ manager_id: Number(k) || null, manager_name: (m.u[k] || {}).name || 'No manager' }, summarise(byManager[k]))),
     rows,
+    idle_cars: readAll('vehicles').filter(v => (v.status === 'active' || v.status === 'in_maintenance') && !m.activeByVehicle[v.id] && (!managerId || v.manager_id === managerId)).map(v => ({
+      vehicle_id: v.id, reg_number: v.reg_number, make: v.make, model: v.model, status: v.status,
+      manager_name: m.u[v.manager_id] ? m.u[v.manager_id].name : null,
+      service_due: alerts.filter(a => a.vehicle_id === v.id && a.category === 'maintenance' && a.severity !== 'upcoming').map(a => `${a.title.split(' – ')[0]}: ${a.detail}`).join('; ') || null,
+    })),
+    cars_without_manager: readAll('vehicles').filter(v => !v.manager_id && v.status !== 'disposed' && v.status !== 'handed_over').length,
   };
 }
 
@@ -1151,7 +1246,7 @@ function dailyCollections(days, managerId) {
   const m = maps();
   const end = dueThrough();
   const out = [];
-  const contracts = readAll('contracts').filter(c => !managerId || (m.d[c.driver_id] && m.d[c.driver_id].manager_id === managerId));
+  const contracts = readAll('contracts').filter(c => !managerId || inGroup('contracts', c, managerId, m));
   for (let i = days - 1; i >= 0; i--) {
     const day = addDays(end, -i);
     let expected = 0, collected = 0;
@@ -1168,7 +1263,7 @@ function dailyCollections(days, managerId) {
 function collectionsSummary(managerId) {
   const m = maps();
   const now = today(), yesterday = dueThrough();
-  const contracts = readAll('contracts').filter(c => !managerId || (m.d[c.driver_id] && m.d[c.driver_id].manager_id === managerId));
+  const contracts = readAll('contracts').filter(c => !managerId || inGroup('contracts', c, managerId, m));
   const active = contracts.filter(c => c.status === 'active');
   const stats = active.map(c => Object.assign({ c }, contractStats(c, m.pay[c.id])));
   const ids = {}; contracts.forEach(c => { ids[c.id] = 1; });
@@ -1193,16 +1288,16 @@ function collectionsSummary(managerId) {
       arrears: x.arrears, days_behind: x.days_behind, last_payment_on: x.last_payment_on,
     })),
     wants_to_stop: active.filter(c => m.lastCheckin[c.driver_id] && m.lastCheckin[c.driver_id].intention === 'wants_to_stop').length,
-    open_complaints: readAll('checkins').filter(ci => ci.complaint_status === 'open' && (!managerId || (m.d[ci.driver_id] && m.d[ci.driver_id].manager_id === managerId))).length,
+    open_complaints: readAll('checkins').filter(ci => ci.complaint_status === 'open' && (!managerId || inGroup('checkins', ci, managerId, m))).length,
     daily: dailyCollections(14, managerId),
   };
 }
 
 const inRange = (d, from, to) => d && d.slice(0, 10) >= from && d.slice(0, 10) <= to;
 
-function vehicleReport(from, to) {
+function vehicleReport(from, to, managerId) {
   const trips = readAll('trips'), fuel = readAll('fuel_logs'), recs = readAll('maintenance_records'), exps = readAll('expenses');
-  return readAll('vehicles').slice().sort((a, b) => String(a.reg_number).localeCompare(String(b.reg_number))).map(v => {
+  return readAll('vehicles').filter(v => !managerId || v.manager_id === managerId).sort((a, b) => String(a.reg_number).localeCompare(String(b.reg_number))).map(v => {
     const t = trips.filter(x => x.vehicle_id === v.id && inRange(x.start_time, from, to));
     const done = t.filter(x => x.status === 'completed' && x.start_odometer != null && x.end_odometer != null);
     const f = fuel.filter(x => x.vehicle_id === v.id && inRange(x.date, from, to));
@@ -1230,9 +1325,9 @@ function vehicleReport(from, to) {
   });
 }
 
-function driverReport(from, to) {
+function driverReport(from, to, managerId) {
   const trips = readAll('trips'), fuel = readAll('fuel_logs');
-  return readAll('drivers').slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map(d => {
+  return readAll('drivers').filter(d => !managerId || d.manager_id === managerId).sort((a, b) => String(a.name).localeCompare(String(b.name))).map(d => {
     const t = trips.filter(x => x.driver_id === d.id && x.status === 'completed' && inRange(x.start_time, from, to));
     const f = fuel.filter(x => x.driver_id === d.id && inRange(x.date, from, to));
     return {
@@ -1243,7 +1338,16 @@ function driverReport(from, to) {
   });
 }
 
-function monthlyCosts(from, to) {
+/** For reports limited to one manager: does this cost belong to one of their cars? */
+function carFilter(managerId) {
+  if (!managerId) return () => true;
+  const mine = {};
+  readAll('vehicles').forEach(v => { if (v.manager_id === managerId) mine[v.id] = 1; });
+  return x => x.vehicle_id != null && !!mine[x.vehicle_id];
+}
+
+function monthlyCosts(from, to, managerId) {
+  const ok = carFilter(managerId);
   const by = {};
   const add = (date, key, amt) => {
     if (!inRange(date, from, to)) return;
@@ -1251,9 +1355,9 @@ function monthlyCosts(from, to) {
     by[m] = by[m] || { month: m, fuel: 0, maintenance: 0, other: 0 };
     by[m][key] += Number(amt) || 0;
   };
-  readAll('fuel_logs').forEach(x => add(x.date, 'fuel', x.cost));
-  readAll('maintenance_records').filter(x => x.status === 'completed').forEach(x => add(x.date, 'maintenance', x.cost));
-  readAll('expenses').forEach(x => add(x.date, 'other', x.amount));
+  readAll('fuel_logs').filter(ok).forEach(x => add(x.date, 'fuel', x.cost));
+  readAll('maintenance_records').filter(x => x.status === 'completed' && ok(x)).forEach(x => add(x.date, 'maintenance', x.cost));
+  readAll('expenses').filter(ok).forEach(x => add(x.date, 'other', x.amount));
   const out = [];
   let y = Number(from.slice(0, 4)), mo = Number(from.slice(5, 7));
   const end = to.slice(0, 7);
@@ -1267,12 +1371,13 @@ function monthlyCosts(from, to) {
   return out;
 }
 
-function categoryReport(from, to) {
+function categoryReport(from, to, managerId) {
+  const ok = carFilter(managerId);
   const totals = {};
   const add = (k, a) => { totals[k] = (totals[k] || 0) + (Number(a) || 0); };
-  readAll('fuel_logs').filter(x => inRange(x.date, from, to)).forEach(x => add('fuel', x.cost));
-  readAll('maintenance_records').filter(x => x.status === 'completed' && inRange(x.date, from, to)).forEach(x => add('maintenance: ' + x.type, x.cost));
-  readAll('expenses').filter(x => inRange(x.date, from, to)).forEach(x => add(x.category, x.amount));
+  readAll('fuel_logs').filter(x => ok(x) && inRange(x.date, from, to)).forEach(x => add('fuel', x.cost));
+  readAll('maintenance_records').filter(x => ok(x) && x.status === 'completed' && inRange(x.date, from, to)).forEach(x => add('maintenance: ' + x.type, x.cost));
+  readAll('expenses').filter(x => ok(x) && inRange(x.date, from, to)).forEach(x => add(x.category, x.amount));
   return Object.keys(totals).map(k => ({ category: k, amount: round(totals[k]) })).filter(r => r.amount > 0).sort((a, b) => b.amount - a.amount);
 }
 
@@ -1284,18 +1389,19 @@ function range(q, defaultDays) {
 }
 
 function dashboard(q, user) {
-  const managerId = q && q.manager_id === 'all' ? null : (Number(q && q.manager_id) || (user && user.role === 'manager' ? user.id : null));
+  const managerId = pickManager(q, user);
   const now = today();
   const monthStart = now.slice(0, 8) + '01';
   const prevEnd = addDays(monthStart, -1);
   const prevStart = prevEnd.slice(0, 8) + '01';
   const yearAgo = addDays(monthStart, -330).slice(0, 8) + '01';
-  const vehicles = readAll('vehicles');
+  const allVehicles = readAll('vehicles');
+  const vehicles = managerId ? allVehicles.filter(v => v.manager_id === managerId) : allVehicles;
   const count = (rows, key) => rows.reduce((m, r) => { m[r[key]] = (m[r[key]] || 0) + 1; return m; }, {});
 
   const spend = (from, to) => {
-    const r = vehicleReport(from, to);
-    const general = sum(readAll('expenses').filter(x => x.vehicle_id == null && inRange(x.date, from, to)), x => x.amount);
+    const r = vehicleReport(from, to, managerId);
+    const general = managerId ? 0 : sum(readAll('expenses').filter(x => x.vehicle_id == null && inRange(x.date, from, to)), x => x.amount);
     const o = {
       fuel: round(sum(r, x => x.fuel_cost)), maintenance: round(sum(r, x => x.maintenance_cost)),
       other: round(sum(r, x => x.other_cost) + general), distance_km: round(sum(r, x => x.distance_km), 0), liters: round(sum(r, x => x.fuel_liters)),
@@ -1310,17 +1416,19 @@ function dashboard(q, user) {
   return {
     manager_id: managerId,
     collections: collectionsSummary(managerId),
-    available_cars: vehicles.filter(v => v.status === 'active' && !m.activeByVehicle[v.id]).map(v => ({ id: v.id, reg_number: v.reg_number, make: v.make, model: v.model })),
+    available_cars: vehicles.filter(v => v.status === 'active' && !m.activeByVehicle[v.id] && (!managerId || v.manager_id === managerId)).map(v => ({ id: v.id, reg_number: v.reg_number, make: v.make, model: v.model, manager_name: m.u[v.manager_id] ? m.u[v.manager_id].name : null })),
+    cars_without_manager: scopeFor(user) ? 0 : allVehicles.filter(v => !v.manager_id && v.status !== 'disposed' && v.status !== 'handed_over').length,
+    my_cars: managerId ? vehicles.filter(v => v.manager_id === managerId && v.status !== 'disposed' && v.status !== 'handed_over').length : null,
     fleet: count(vehicles, 'status'),
     fleet_total: vehicles.length,
     by_type: Object.keys(byType).map(k => ({ type: k, n: byType[k] })).sort((a, b) => b.n - a.n),
-    drivers: count(readAll('drivers'), 'status'),
+    drivers: count(readAll('drivers').filter(d => !managerId || d.manager_id === managerId), 'status'),
     this_month: spend(monthStart, now),
     last_month: spend(prevStart, prevEnd),
-    monthly: monthlyCosts(yearAgo, now),
-    top_vehicles: vehicleReport(addDays(now, -90), now).filter(v => v.total_cost > 0).sort((a, b) => b.total_cost - a.total_cost).slice(0, 5),
-    active_trips: readAll('trips').filter(t => t.status === 'in_progress').map(t => VIEWS.trips(t, m)).sort((a, b) => String(b.start_time).localeCompare(String(a.start_time))),
-    activity: readAll('audit_log').slice(-8).reverse(),
+    monthly: monthlyCosts(yearAgo, now, managerId),
+    top_vehicles: vehicleReport(addDays(now, -90), now, managerId).filter(v => v.total_cost > 0).sort((a, b) => b.total_cost - a.total_cost).slice(0, 5),
+    active_trips: readAll('trips').filter(t => t.status === 'in_progress' && (!managerId || inGroup('trips', t, managerId, m))).map(t => VIEWS.trips(t, m)).sort((a, b) => String(b.start_time).localeCompare(String(a.start_time))),
+    activity: readAll('audit_log').filter(a => !scopeFor(user) || a.user_id === user.id).slice(-8).reverse(),
     alerts: alerts.slice(0, 6),
     alert_counts: {
       total: alerts.length,
@@ -1369,7 +1477,7 @@ function route(method, path, q, body, token) {
   // Insights
   if (path === '/alerts') {
     // Managers see alerts for their own drivers by default; pass manager_id=all for everything.
-    const mid = q.manager_id === 'all' ? null : (Number(q.manager_id) || (user.role === 'manager' ? user.id : null));
+    const mid = pickManager(q, user);
     const alerts = computeAlerts().filter(a => !mid || a.manager_id === mid);
     const c = s => alerts.filter(a => a.severity === s).length;
     return { alerts, counts: { total: alerts.length, overdue: c('overdue'), urgent: c('urgent'), upcoming: c('upcoming') } };
@@ -1377,16 +1485,18 @@ function route(method, path, q, body, token) {
   if (path === '/dashboard') return dashboard(q, user);
   if (path === '/reports/manager') return managerReport(q, user);
   if (path === '/managers') {
+    if (scopeFor(user)) return { rows: [{ id: user.id, name: user.name, role: user.role }] };
     return { rows: readAll('users').filter(u => u.active && (u.role === 'manager' || u.role === 'admin')).map(u => ({ id: u.id, name: u.name, role: u.role })).sort((a, b) => a.name.localeCompare(b.name)) };
   }
-  if (path === '/reports/vehicles') { const r = range(q); return { rows: vehicleReport(r.from, r.to) }; }
-  if (path === '/reports/drivers') { const r = range(q); return { rows: driverReport(r.from, r.to) }; }
-  if (path === '/reports/monthly') { const r = range(q, 365); return { rows: monthlyCosts(r.from, r.to) }; }
-  if (path === '/reports/expense-categories') { const r = range(q); return { rows: categoryReport(r.from, r.to) }; }
+  if (path === '/reports/vehicles') { const r = range(q); return { rows: vehicleReport(r.from, r.to, pickManager(q, user)) }; }
+  if (path === '/reports/drivers') { const r = range(q); return { rows: driverReport(r.from, r.to, pickManager(q, user)) }; }
+  if (path === '/reports/monthly') { const r = range(q, 365); return { rows: monthlyCosts(r.from, r.to, pickManager(q, user)) }; }
+  if (path === '/reports/expense-categories') { const r = range(q); return { rows: categoryReport(r.from, r.to, pickManager(q, user)) }; }
   let mm = path.match(/^\/vehicles\/(\d+)\/summary$/);
   if (mm) {
     const id = Number(mm[1]);
     const now = today();
+    if (scopeFor(user) && !inGroup('vehicles', findById('vehicles', id), scopeFor(user), maps())) throw new HttpError(404, 'Car not found');
     return {
       all_time: vehicleReport('1900-01-01', now).find(r => r.vehicle_id === id) || null,
       last_90_days: vehicleReport(addDays(now, -90), now).find(r => r.vehicle_id === id) || null,
@@ -1417,6 +1527,7 @@ function route(method, path, q, body, token) {
       if (!u) throw new HttpError(404, 'User not found');
       deleteWhere('users', r => r.id === id);
       updateWhere('drivers', r => r.manager_id === id, { manager_id: null });
+      updateWhere('vehicles', r => r.manager_id === id, { manager_id: null });
       audit(user, 'delete', 'User', id, u.email);
       return { ok: true };
     }
@@ -1449,7 +1560,8 @@ function route(method, path, q, body, token) {
   if (path === '/audit') {
     requireRole(user, 'manager');
     const limit = Math.min(parseInt(q.limit, 10) || 100, 500);
-    return { rows: readAll('audit_log').slice(-limit).reverse() };
+    // Managers see their own changes; admins see everyone's.
+    return { rows: readAll('audit_log').filter(a => !scopeFor(user) || a.user_id === user.id).slice(-limit).reverse() };
   }
 
   // Resources: /vehicles, /vehicles/12, /maintenance/records/3 ...
@@ -1458,9 +1570,10 @@ function route(method, path, q, body, token) {
     const res = RESOURCES[mm[1]];
     const id = mm[2] ? Number(mm[2]) : null;
     if (method === 'GET') {
-      if (!id) return list(res, q);
+      if (!id) return list(res, q, user);
       const row = findById(res.table, id);
       if (!row) throw new HttpError(404, `${res.entity} not found`);
+      if (scopeFor(user) && !inGroup(res.table, row, scopeFor(user), maps())) throw notInGroup(res);
       return view(res, row);
     }
     if (method === 'POST' && !id) return save(res, null, body, user);
@@ -1702,6 +1815,10 @@ function loadDemoData() {
     v.row.current_odometer = Math.round((v.ev ? 30 : 40000 + rnd() * 30000) + days * (v.ev ? 150 : 180) * between(0.85, 1.15));
   });
   T.vehicles[14].assigned_driver_id = null; // retrieved, waiting for a new driver
+  T.vehicles.forEach(v => {
+    const c = T.contracts.filter(x => x.vehicle_id === v.id).slice(-1)[0];
+    v.manager_id = c ? T.drivers[c.driver_id - 1].manager_id : managers[0];
+  });
 
   // Service schedules and history
   const garages = ['Toyota Ghana Service', 'Rana Motors', 'Mechanic Hub Spintex', 'Silver Star Auto', 'Tyre Plus Accra', 'BYD Service Centre Accra'];

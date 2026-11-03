@@ -39,11 +39,11 @@ test('vehicles and drivers with validation and uniqueness', () => {
   assert.equal(bad.status, 422);
   assert.ok(bad.details.reg_number && bad.details.type);
   did = ok(as(admin, 'POST', '/drivers', { body: { name: 'Kwame', status: 'active', license_expiry: '2020-01-01' } })).id;
-  const v = ok(as(admin, 'POST', '/vehicles', { body: { reg_number: 'GR-1-24', make: 'Toyota', model: 'Hilux', type: 'pickup', fuel_type: 'diesel', status: 'active', current_odometer: 1000, assigned_driver_id: did, insurance_expiry: '2001-01-01' } }));
+  const v = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'GR-1-24', make: 'Toyota', model: 'Hilux', type: 'pickup', fuel_type: 'diesel', status: 'active', current_odometer: 1000, assigned_driver_id: did, insurance_expiry: '2001-01-01' } }));
   assert.equal(v.driver_name, 'Kwame');
   assert.equal(v.current_odometer, 1000);
   vid = v.id;
-  assert.equal(as(admin, 'POST', '/vehicles', { body: { reg_number: 'gr-1-24', make: 'a', model: 'b', type: 'car', fuel_type: 'petrol', status: 'active' } }).status, 409);
+  assert.equal(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'gr-1-24', make: 'a', model: 'b', type: 'car', fuel_type: 'petrol', status: 'active' } }).status, 409);
   // values round-trip through the sheet as typed values
   const again = ok(as(admin, 'GET', `/vehicles/${vid}`));
   assert.equal(typeof again.current_odometer, 'number');
@@ -114,7 +114,7 @@ test('work & pay contract: deposit rules, arrears, MoMo references, handover', (
   const mgr = ok(as(admin, 'POST', '/users', { body: { name: 'Mgr One', email: 'm1@x.com', password: 'manager123', role: 'manager' } }));
   const mtok = ok(call('POST', '/auth/login', { body: { email: 'm1@x.com', password: 'manager123' } })).token;
   const drv = ok(as(admin, 'POST', '/drivers', { body: { name: 'Ama Driver', status: 'active', manager_id: mgr.id, momo_number: '0241112222' } }));
-  const car = ok(as(admin, 'POST', '/vehicles', { body: { reg_number: 'GR-100-26', make: 'Toyota', model: 'Vitz', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: mgr.id, reg_number: 'GR-100-26', make: 'Toyota', model: 'Vitz', type: 'car', fuel_type: 'petrol', status: 'active' } }));
   const start = addDays(today(), -14);
   const base = { driver_id: drv.id, vehicle_id: car.id, type: 'work_and_pay', start_date: start, status: 'active', deposit_reference: 'DEP001' };
 
@@ -200,8 +200,8 @@ test('work & pay contract: deposit rules, arrears, MoMo references, handover', (
 test('daily hire rates for Cerio and BYD, no deposit needed', () => {
   const d1 = ok(as(admin, 'POST', '/drivers', { body: { name: 'EV One', status: 'active' } }));
   const d2 = ok(as(admin, 'POST', '/drivers', { body: { name: 'EV Two', status: 'active' } }));
-  const cerio = ok(as(admin, 'POST', '/vehicles', { body: { reg_number: 'EV-1', make: 'Cerio', model: 'EV', type: 'car', fuel_type: 'electric', status: 'active' } }));
-  const byd = ok(as(admin, 'POST', '/vehicles', { body: { reg_number: 'EV-2', make: 'BYD', model: 'Dolphin', type: 'car', fuel_type: 'electric', status: 'active' } }));
+  const cerio = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'EV-1', make: 'Cerio', model: 'EV', type: 'car', fuel_type: 'electric', status: 'active' } }));
+  const byd = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'EV-2', make: 'BYD', model: 'Dolphin', type: 'car', fuel_type: 'electric', status: 'active' } }));
   const a = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d1.id, vehicle_id: cerio.id, type: 'daily_hire', start_date: ctx.today(), status: 'active' } }));
   const b = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d2.id, vehicle_id: byd.id, type: 'daily_hire', start_date: ctx.today(), status: 'active' } }));
   assert.equal(a.daily_rate, 500); assert.equal(b.daily_rate, 700);
@@ -215,6 +215,85 @@ test('payDays counts Monday–Saturday', () => {
   assert.equal(ctx.payDays('2026-11-01', '2026-11-30', 'every_day'), 30);
 });
 
+test('cars need a manager with the manager role', () => {
+  assert.equal(as(admin, 'POST', '/vehicles', { body: { reg_number: 'NM-1', make: 'Kia', model: 'Rio', type: 'car', fuel_type: 'petrol', status: 'active' } }).details.manager_id, 'Required');
+  const viewerUser = ok(as(admin, 'GET', '/users')).rows.find(u => u.role === 'viewer');
+  assert.ok(as(admin, 'POST', '/vehicles', { body: { manager_id: viewerUser.id, reg_number: 'NM-1', make: 'Kia', model: 'Rio', type: 'car', fuel_type: 'petrol', status: 'active' } }).details.manager_id);
+  const mgr = ok(as(admin, 'POST', '/users', { body: { name: 'Car Mgr', email: 'cm@x.com', password: 'manager123', role: 'manager' } }));
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: mgr.id, reg_number: 'NM-1', make: 'Kia', model: 'Rio', type: 'car', fuel_type: 'petrol', status: 'active', insurance_expiry: '2000-01-01' } }));
+  assert.equal(car.manager_name, 'Car Mgr');
+  assert.equal(ok(as(admin, 'GET', '/vehicles', { query: { manager_id: mgr.id } })).total, 1);
+  const mt = ok(call('POST', '/auth/login', { body: { email: 'cm@x.com', password: 'manager123' } })).token;
+  assert.ok(ok(as(mt, 'GET', '/alerts')).alerts.some(a => a.vehicle_id === car.id && a.kind === 'insurance'));
+  const rep = ok(as(mt, 'GET', '/reports/manager', { query: { period: 'week' } }));
+  assert.ok(rep.idle_cars.some(c => c.vehicle_id === car.id));
+  // a driver without a manager picks up the car's manager when given the car
+  const drv = ok(as(admin, 'POST', '/drivers', { body: { name: 'No Mgr', status: 'active' } }));
+  ok(as(admin, 'POST', '/contracts', { body: { driver_id: drv.id, vehicle_id: car.id, type: 'daily_hire', start_date: ctx.today(), status: 'active', daily_rate: 450 } }));
+  assert.equal(ok(as(admin, 'GET', `/drivers/${drv.id}`)).manager_id, mgr.id);
+});
+
+test('managers only see and change their own group', () => {
+  const mA = ok(as(admin, 'POST', '/users', { body: { name: 'Group A', email: 'ga@x.com', password: 'manager123', role: 'manager' } }));
+  const mB = ok(as(admin, 'POST', '/users', { body: { name: 'Group B', email: 'gb@x.com', password: 'manager123', role: 'manager' } }));
+  const ta = ok(call('POST', '/auth/login', { body: { email: 'ga@x.com', password: 'manager123' } })).token;
+  const tb = ok(call('POST', '/auth/login', { body: { email: 'gb@x.com', password: 'manager123' } })).token;
+  const carA = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: mA.id, reg_number: 'AA-1', make: 'Cerio', model: 'EV', type: 'car', fuel_type: 'electric', status: 'active' } }));
+  const carB = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: mB.id, reg_number: 'BB-1', make: 'BYD', model: 'EV', type: 'car', fuel_type: 'electric', status: 'active' } }));
+  const drvA = ok(as(ta, 'POST', '/drivers', { body: { name: 'Driver A', status: 'active' } }));
+  assert.equal(drvA.manager_id, mA.id, 'a manager’s new driver joins their group');
+  const drvB = ok(as(tb, 'POST', '/drivers', { body: { name: 'Driver B', status: 'active' } }));
+
+  // lists are limited
+  const carsA = ok(as(ta, 'GET', '/vehicles', { query: { limit: 500 } })).rows;
+  assert.deepEqual(carsA.map(v => v.reg_number), ['AA-1']);
+  assert.equal(ok(as(ta, 'GET', '/vehicles', { query: { manager_id: 'all', limit: 500 } })).total, 1);
+  assert.deepEqual(ok(as(ta, 'GET', '/drivers', { query: { limit: 500 } })).rows.map(d => d.name), ['Driver A']);
+  assert.ok(ok(as(admin, 'GET', '/vehicles', { query: { limit: 500 } })).total > 2, 'admin still sees everything');
+
+  // single records, edits and deletes in another group look like they don't exist
+  assert.equal(as(ta, 'GET', `/vehicles/${carB.id}`).status, 404);
+  assert.equal(as(ta, 'GET', `/drivers/${drvB.id}`).status, 404);
+  assert.equal(as(ta, 'PUT', `/vehicles/${carB.id}`, { body: { color: 'Red' } }).status, 404);
+  assert.equal(as(ta, 'DELETE', `/drivers/${drvB.id}`).status, 404);
+  assert.equal(as(ta, 'GET', `/vehicles/${carB.id}/summary`).status, 404);
+
+  // can't move own car to another manager, or create a car for someone else
+  assert.equal(as(ta, 'PUT', `/vehicles/${carA.id}`, { body: { manager_id: mB.id } }).status, 403);
+  assert.equal(as(ta, 'POST', '/vehicles', { body: { manager_id: mB.id, reg_number: 'AA-2', make: 'Kia', model: 'Rio', type: 'car', fuel_type: 'petrol', status: 'active' } }).status, 403);
+  const own = ok(as(ta, 'POST', '/vehicles', { body: { reg_number: 'AA-2', make: 'Kia', model: 'Rio', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  assert.equal(own.manager_id, mA.id);
+
+  // contracts and payments
+  assert.equal(as(ta, 'POST', '/contracts', { body: { driver_id: drvA.id, vehicle_id: carB.id, type: 'daily_hire', start_date: ctx.today(), status: 'active' } }).status, 403);
+  assert.equal(as(admin, 'POST', '/contracts', { body: { driver_id: drvA.id, vehicle_id: carB.id, type: 'daily_hire', start_date: ctx.today(), status: 'active' } }).status, 422, 'car and driver must be in the same group');
+  const cA = ok(as(ta, 'POST', '/contracts', { body: { driver_id: drvA.id, vehicle_id: carA.id, type: 'daily_hire', start_date: ctx.addDays(ctx.today(), -3), status: 'active' } }));
+  const cB = ok(as(tb, 'POST', '/contracts', { body: { driver_id: drvB.id, vehicle_id: carB.id, type: 'daily_hire', start_date: ctx.addDays(ctx.today(), -3), status: 'active' } }));
+  assert.equal(as(ta, 'POST', '/payments', { body: { contract_id: cB.id, type: 'daily', work_date: cB.start_date, paid_on: ctx.today(), amount: 700, momo_reference: 'GRP-X1' } }).status, 403);
+  ok(as(tb, 'POST', '/payments', { body: { contract_id: cB.id, type: 'daily', work_date: cB.start_date, paid_on: ctx.today(), amount: 700, momo_reference: 'GRP-B1' } }));
+  assert.equal(ok(as(ta, 'GET', '/payments', { query: { limit: 500 } })).rows.filter(p => p.momo_reference === 'GRP-B1').length, 0);
+  assert.equal(ok(as(ta, 'GET', '/contracts', { query: { limit: 500 } })).rows.every(c => c.vehicle_id !== carB.id), true);
+
+  // reports, dashboard, alerts and the manager list are limited too
+  const rep = ok(as(ta, 'GET', '/reports/manager', { query: { period: 'week', manager_id: 'all' } }));
+  assert.equal(rep.manager_id, mA.id);
+  assert.ok(rep.rows.every(r => r.vehicle_id !== carB.id));
+  const dash = ok(as(ta, 'GET', '/dashboard', { query: { manager_id: 'all' } }));
+  assert.equal(dash.manager_id, mA.id);
+  assert.equal(dash.fleet_total, 2);
+  assert.ok(ok(as(ta, 'GET', '/alerts', { query: { manager_id: 'all' } })).alerts.every(a => a.manager_id === mA.id));
+  assert.deepEqual(ok(as(ta, 'GET', '/managers')).rows.map(u => u.name), ['Group A']);
+  assert.ok(ok(as(ta, 'GET', '/reports/vehicles')).rows.every(r => r.vehicle_id !== carB.id));
+  assert.ok(ok(as(ta, 'GET', '/audit')).rows.every(a => a.user_id === mA.id));
+  assert.ok(cA.id);
+
+  // moving a car to another manager takes its driver along (and the other way round)
+  ok(as(admin, 'PUT', `/vehicles/${carA.id}`, { body: { manager_id: mB.id } }));
+  assert.equal(ok(as(admin, 'GET', `/drivers/${drvA.id}`)).manager_id, mB.id);
+  ok(as(admin, 'PUT', `/drivers/${drvA.id}`, { body: { manager_id: mA.id } }));
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${carA.id}`)).manager_id, mA.id);
+});
+
 test('demo data and dashboard', () => {
   ctx.loadDemoData();
   const d = ok(as(admin, 'GET', '/dashboard'));
@@ -224,6 +303,8 @@ test('demo data and dashboard', () => {
   assert.ok(d.collections.arrears_total > 0);
   assert.ok(d.collections.top_arrears.length > 0);
   assert.equal(d.available_cars.length, 1);
+  assert.equal(d.cars_without_manager, 0);
+  assert.ok(ok(as(admin, 'GET', '/vehicles', { query: { limit: 100 } })).rows.every(v => v.manager_name));
   assert.ok(d.alert_counts.total > 0);
   const mtok = ok(call('POST', '/auth/login', { body: { email: 'manager@fleet.local', password: 'demo12345' } })).token;
   const rep = ok(as(mtok, 'GET', '/reports/manager', { query: { period: 'week' } }));

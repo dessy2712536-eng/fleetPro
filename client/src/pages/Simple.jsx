@@ -1,19 +1,42 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { api } from '../api';
 import { useApp } from '../context';
 import { PageHead, ResourceTable } from '../ui';
 import ImportVehicles from './ImportVehicles';
+import AssignManager from './AssignManager';
 import { checkinsCfg, contractsCfg, driversCfg, expensesCfg, fuelCfg, paymentsCfg, recordsCfg, schedulesCfg, tripsCfg, vehiclesCfg } from '../resources';
 
 export function VehiclesPage() {
   const app = useApp();
   const [importing, setImporting] = useState(false);
+  const [assigning, setAssigning] = useState(false);
   const [version, setVersion] = useState(0);
+  const [unassigned, setUnassigned] = useState(0);
+  const isAdmin = app.can('admin');
+  useEffect(() => {
+    if (!isAdmin) return;
+    api('/vehicles', { query: { limit: 5000 } })
+      .then(r => setUnassigned(r.rows.filter(v => !v.manager_id && v.status !== 'disposed' && v.status !== 'handed_over').length))
+      .catch(() => {});
+  }, [isAdmin, version]);
   return (
     <>
-      <PageHead title="Cars" sub="Every car, who is driving it, and its paperwork.">
+      <PageHead title="Cars" sub={app.user.role === 'manager' ? 'The cars in your group, who is driving them, and their paperwork.' : 'Every car, its manager and driver, and its paperwork.'}>
+        {isAdmin && <button className="btn ghost" onClick={() => setAssigning(true)}>Assign manager</button>}
         {app.can('manager') && <button className="btn ghost" onClick={() => setImporting(true)}>Import cars</button>}
       </PageHead>
+      {isAdmin && unassigned > 0 && (
+        <div className="notice warn">
+          <span><strong>{unassigned} car{unassigned === 1 ? ' has' : 's have'} no manager.</strong> Managers can only see cars assigned to them.</span>
+          <button className="btn primary sm" onClick={() => setAssigning(true)}>Assign manager</button>
+        </div>
+      )}
       <ResourceTable key={version} cfg={vehiclesCfg(app)} />
+      {assigning && (
+        <AssignManager
+          onClose={() => setAssigning(false)}
+          onDone={(n, name) => { setVersion(v => v + 1); if (n) app.notify(`${n} car${n === 1 ? '' : 's'} assigned to ${name}`); }} />
+      )}
       {importing && (
         <ImportVehicles
           onClose={() => setImporting(false)}

@@ -168,6 +168,20 @@ export default function ManagerReport() {
               </tbody>
             </table>
           </div>
+          {data.idle_cars?.length > 0 && (
+            <section className="panel idle-cars">
+              <header className="panel-head"><h2>Cars without a driver ({data.idle_cars.length})</h2></header>
+              <ul className="plain-list">
+                {data.idle_cars.map(c => (
+                  <li key={c.vehicle_id}>
+                    <Plate to={`/vehicles/${c.vehicle_id}`}>{c.reg_number}</Plate>
+                    <div>{c.make} {c.model} <Badge value={c.status} />{managerId === 'all' && c.manager_name ? <span className="dim"> · {c.manager_name}</span> : ''}
+                      {c.service_due && <div className="txt-warn small">{c.service_due}</div>}</div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <p className="footnote">
             Drivers pay the day after they work, so "Expected" only counts work days up to {fmtDate(data.due_through)}. Pay days are {human('mon_sat')} unless a contract says otherwise.
             "Short" is for this {period === 'day' ? 'day' : period}; "Total owing" is everything outstanding since the contract started.

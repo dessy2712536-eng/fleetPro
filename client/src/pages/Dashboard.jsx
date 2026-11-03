@@ -39,6 +39,12 @@ export default function Dashboard() {
         </select>
       </PageHead>
 
+      {d.cars_without_manager > 0 && (
+        <div className="notice warn">
+          <span><strong>{d.cars_without_manager} car{d.cars_without_manager === 1 ? ' has' : 's have'} no manager.</strong> No manager can see {d.cars_without_manager === 1 ? 'it' : 'them'} until you assign one.</span>
+          <Link to="/vehicles" className="btn primary sm">Assign managers</Link>
+        </div>
+      )}
       <div className="kpis">
         <div className="kpi">
           <span className="kpi-label">Paid for yesterday's work</span>
@@ -124,6 +130,7 @@ export default function Dashboard() {
         <section className="panel">
           <header className="panel-head"><h2>Fleet</h2><Link to="/contracts">Contracts</Link></header>
           <dl className="facts-inline stacked">
+            {d.my_cars != null && <div><dt>Cars in this group</dt><dd>{d.my_cars}</dd></div>}
             <div><dt>Work & pay drivers</dt><dd>{c.work_and_pay}</dd></div>
             <div><dt>Daily hire (EV)</dt><dd>{c.daily_hire}</dd></div>
             <div><dt>Cars in workshop</dt><dd>{d.fleet.in_maintenance || 0}</dd></div>
@@ -132,7 +139,7 @@ export default function Dashboard() {
           <h3 className="mini-head">Cars waiting for a driver</h3>
           {d.available_cars.length === 0 ? <p className="dim">None — every active car has a driver.</p> : (
             <ul className="plain-list">
-              {d.available_cars.map(v => <li key={v.id}><Plate to={`/vehicles/${v.id}`}>{v.reg_number}</Plate><span>{v.make} {v.model} <span className="dim">· retrieved car, 5,000+ deposit</span></span></li>)}
+              {d.available_cars.map(v => <li key={v.id}><Plate to={`/vehicles/${v.id}`}>{v.reg_number}</Plate><span>{v.make} {v.model} <span className="dim">{v.manager_name && managerId === 'all' ? `· ${v.manager_name}` : ''}</span></span></li>)}
             </ul>
           )}
         </section>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
-import { Modal, Plate, fmtDate, invalidateOptions } from '../ui';
+import { useApp } from '../context';
+import { Modal, Plate, fmtDate, invalidateOptions, useOptions } from '../ui';
 
 // Column names people commonly use, mapped to FleetPro fields.
 const HEADERS = {
@@ -18,6 +19,7 @@ const HEADERS = {
   purchase_date: ['purchase date', 'date bought', 'bought on'],
   purchase_price: ['purchase price', 'price', 'cost'],
   notes: ['notes', 'note', 'comments', 'remarks'],
+  manager: ['manager', 'manager name', 'managed by', 'supervisor'],
 };
 const DATE_FIELDS = ['insurance_expiry', 'roadworthy_expiry', 'registration_expiry', 'purchase_date'];
 const LABELS = { insurance_expiry: 'Insurance expiry', roadworthy_expiry: 'Roadworthy expiry', registration_expiry: 'Registration expiry', purchase_date: 'Purchase date' };
@@ -42,7 +44,7 @@ function toISODate(v) {
 }
 
 const TEMPLATE_COLUMNS = [
-  ['Car number *', 16], ['Make *', 14], ['Model *', 14], ['Year', 8], ['Fuel type', 11], ['Colour', 10], ['Chassis number', 20],
+  ['Car number *', 16], ['Make *', 14], ['Model *', 14], ['Manager', 18], ['Year', 8], ['Fuel type', 11], ['Colour', 10], ['Chassis number', 20],
   ['Odometer (km)', 14], ['Insurance expiry', 16], ['Roadworthy expiry', 17], ['Registration expiry', 18], ['Purchase date', 14], ['Purchase price', 14], ['Notes', 30],
 ];
 
@@ -54,6 +56,7 @@ export async function downloadTemplate() {
     [''],
     ['1. Use the "Cars" sheet. Put one car on each row, starting on row 2. Keep the header row as it is.'],
     ['2. Car number, Make and Model are required. Everything else is optional and can be added later in FleetPro.'],
+    ['   Manager: type the manager\'s name exactly as it appears in FleetPro (Settings → Users), or leave it empty and choose one manager for all the cars when you upload.'],
     ['3. Fuel type: Petrol, Diesel, Electric or Hybrid. Leave it empty and Cerio/BYD cars become Electric, others Petrol.'],
     ['4. Dates: type them as 31/12/2026 (day/month/year) or pick them from Excel\'s date picker.'],
     ['5. Save the file, then in FleetPro go to Cars → Import cars → Upload the filled-in file.'],
@@ -61,9 +64,9 @@ export async function downloadTemplate() {
     [''],
     [{ value: 'Examples (do not type these into the Cars sheet unless they are your cars):', fontWeight: 'bold' }],
     head.map(h => ({ ...h, backgroundColor: '#E7ECEA' })),
-    ['GR 4521-21', 'Toyota', 'Vitz', 2019, 'Petrol', 'Silver', 'JT1234567890', 85000, '31/03/2027', '15/06/2027', '10/01/2027', '15/02/2024', 145000, 'Work & pay car'],
-    ['GR 1001-25', 'Cerio', 'EV', 2025, 'Electric', 'White', '', 12000, '20/08/2027', '', '', '', '', 'Daily hire, GHS 500'],
-    ['GR 2001-25', 'BYD', 'Dolphin', 2025, 'Electric', 'Blue', '', 9000, '', '', '', '', '', 'Daily hire, GHS 700'],
+    ['GR 4521-21', 'Toyota', 'Vitz', 'Samuel Adjei', 2019, 'Petrol', 'Silver', 'JT1234567890', 85000, '31/03/2027', '15/06/2027', '10/01/2027', '15/02/2024', 145000, 'Work & pay car'],
+    ['GR 1001-25', 'Cerio', 'EV', 'Grace Mensah', 2025, 'Electric', 'White', '', 12000, '20/08/2027', '', '', '', '', 'Daily hire, GHS 500'],
+    ['GR 2001-25', 'BYD', 'Dolphin', '', 2025, 'Electric', 'Blue', '', 9000, '', '', '', '', '', 'Daily hire, GHS 700'],
   ];
   await writeExcelFile([
     { data: [head], sheet: 'Cars', columns: TEMPLATE_COLUMNS.map(([, w]) => ({ width: w })), stickyRowsCount: 1 },
@@ -136,6 +139,7 @@ export function parseRows(input) {
       status: 'active',
       purchase_price: Number.isFinite(price) ? price : null,
       notes: get('notes') || null,
+      manager_text: get('manager'),
       ...dates,
       badDates,
     };
@@ -145,6 +149,9 @@ export function parseRows(input) {
 const SAMPLE = 'Car number\tMake\tModel\nGR 4521-21\tToyota\tVitz\nGT 1182-22\tToyota\tCorolla\nGR 1001-25\tCerio\tEV\nGR 2001-25\tBYD\tDolphin';
 
 export default function ImportVehicles({ onClose, onDone }) {
+  const { user } = useApp();
+  const managers = useOptions('manager');
+  const [managerId, setManagerId] = useState(user.role === 'manager' ? String(user.id) : '');
   const [text, setText] = useState('');
   const [existing, setExisting] = useState(null);
   const [progress, setProgress] = useState(null); // {done, total, errors: []}
@@ -166,15 +173,21 @@ export default function ImportVehicles({ onClose, onDone }) {
 
   const key = r => r.reg_number.replace(/[\s-]/g, '');
   const seen = new Map();
+  const findManager = name => managers.find(m => m.label.trim().toLowerCase() === name.trim().toLowerCase());
   const checked = rows.map(r => {
     let problem = null;
+    const fromFile = r.manager_text ? findManager(r.manager_text) : null;
+    const manager_id = user.role === 'manager' ? user.id : fromFile ? fromFile.value : (managerId ? Number(managerId) : null);
+    const manager_label = (managers.find(m => m.value === manager_id) || {}).label || null;
     if (!r.reg_number) problem = 'No car number';
+    else if (user.role !== 'manager' && r.manager_text && !fromFile) problem = `No manager called "${r.manager_text}"`;
+    else if (!manager_id) problem = 'Choose a manager';
     else if (!r.make || !r.model) problem = 'No make/model';
     else if (r.badDates.length) problem = `Check date: ${r.badDates.join(', ')}`;
     else if (existing && existing.has(key(r))) problem = 'Already in FleetPro';
     else if (seen.has(key(r))) problem = 'Listed twice';
     seen.set(key(r), true);
-    return { ...r, problem };
+    return { ...r, manager_id, manager_label, problem };
   });
   const good = checked.filter(r => !r.problem);
 
@@ -203,7 +216,7 @@ export default function ImportVehicles({ onClose, onDone }) {
     const errors = [];
     setProgress({ done: 0, total: good.length, errors });
     for (let i = 0; i < good.length; i++) {
-      const { line, problem, badDates, ...body } = good[i];
+      const { line, problem, badDates, manager_text, manager_label, ...body } = good[i];
       try { await api('/vehicles', { method: 'POST', body }); }
       catch (e) { errors.push(`${body.reg_number}: ${e.message}${e.details && Object.values(e.details).length ? ' – ' + Object.values(e.details).join(', ') : ''}`); }
       setProgress({ done: i + 1, total: good.length, errors: [...errors] });
@@ -249,16 +262,28 @@ export default function ImportVehicles({ onClose, onDone }) {
 
         {checked.length > 0 && !progress?.total && (
           <>
+            {user.role !== 'manager' && (
+              <div className="toolbar manager-pick">
+                <label className="inline-label" htmlFor="import-manager">Manager for these cars
+                  <select id="import-manager" value={managerId} onChange={e => setManagerId(e.target.value)}>
+                    <option value="">Choose manager…</option>
+                    {managers.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  </select>
+                </label>
+                <span className="dim">Rows with a manager in the file keep that manager.</span>
+              </div>
+            )}
             <p className="import-count"><strong>{good.length}</strong> car{good.length === 1 ? '' : 's'} ready to import{checked.length > good.length && <> · <span className="txt-warn">{checked.length - good.length} will be skipped</span></>}</p>
             <div className="table-wrap import-preview">
               <table className="data">
-                <thead><tr><th>Car number</th><th>Make</th><th>Model</th><th>Fuel</th><th>Year</th><th>Insurance</th><th>Roadworthy</th><th /></tr></thead>
+                <thead><tr><th>Car number</th><th>Make</th><th>Model</th><th>Manager</th><th>Fuel</th><th>Year</th><th>Insurance</th><th>Roadworthy</th><th /></tr></thead>
                 <tbody>
                   {checked.map(r => (
                     <tr key={r.line} className={r.problem ? 'skip' : ''}>
                       <td>{r.reg_number ? <Plate>{r.reg_number}</Plate> : <span className="dim">—</span>}</td>
                       <td>{r.make || <span className="dim">—</span>}</td>
                       <td>{r.model || <span className="dim">—</span>}</td>
+                      <td>{r.manager_label || r.manager_text || <span className="dim">—</span>}</td>
                       <td>{r.fuel_type === 'electric' ? 'Electric' : 'Petrol'}</td>
                       <td>{r.year || <span className="dim">—</span>}</td>
                       <td>{r.insurance_expiry ? fmtDate(r.insurance_expiry) : <span className="dim">—</span>}</td>

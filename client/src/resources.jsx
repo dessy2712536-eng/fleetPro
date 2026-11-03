@@ -5,26 +5,30 @@ import { Link } from 'react-router-dom';
 export const VEHICLE_TYPES = ['car', 'suv', 'pickup', 'van', 'truck', 'bus', 'motorbike', 'equipment', 'other'];
 export const FUEL_TYPES = ['petrol', 'diesel', 'electric', 'hybrid', 'lpg', 'cng', 'other'];
 
-export const vehiclesCfg = ({ dist }) => ({
+export const vehiclesCfg = ({ dist, user }) => ({
   endpoint: '/vehicles', singular: 'Car', exportName: 'vehicles',
-  searchPlaceholder: 'Search plate, make, model, driver',
+  searchPlaceholder: 'Search plate, make, model, driver, manager',
   rowLink: r => `/vehicles/${r.id}`,
+  initialFilters: mineFirst(user),
   filters: [
+    { name: 'manager_id', label: 'Manager', ref: 'manager' },
     { name: 'status', label: 'Status', options: ['active', 'in_maintenance', 'inactive', 'handed_over', 'disposed'] },
     { name: 'type', label: 'Type', options: VEHICLE_TYPES },
   ],
   columns: [
     { key: 'reg_number', label: 'Car', sort: 'reg_number', render: r => <Plate to={`/vehicles/${r.id}`}>{r.reg_number}</Plate> },
     { key: 'make', label: 'Make & model', sort: 'make', render: r => <><strong>{r.make} {r.model}</strong><div className="dim">{r.year || ''} {human(r.type)} · {human(r.fuel_type)}</div></> },
-    { key: 'driver_name', label: 'Assigned driver', render: r => r.driver_name || <span className="dim">Unassigned</span> },
+    { key: 'manager_name', label: 'Manager', sort: 'manager_name', hideIn: 'manager_id', render: r => r.manager_name || <span className="txt-bad">No manager</span> },
+    { key: 'driver_name', label: 'Driver', render: r => r.driver_name || <span className="dim">No driver</span> },
     { key: 'current_odometer', label: 'Odometer', num: true, sort: 'current_odometer', render: r => dist(r.current_odometer) },
     { key: 'insurance_expiry', label: 'Insurance', render: r => <ExpiryCell date={r.insurance_expiry} /> },
     { key: 'roadworthy_expiry', label: 'Roadworthy', render: r => <ExpiryCell date={r.roadworthy_expiry} /> },
     { key: 'status', label: 'Status', sort: 'status', render: r => <Badge value={r.status} /> },
   ],
-  defaults: () => ({ type: 'car', fuel_type: 'petrol', status: 'active', current_odometer: 0 }),
+  defaults: () => ({ type: 'car', fuel_type: 'petrol', status: 'active', current_odometer: 0, ...(user && user.role === 'manager' ? { manager_id: user.id } : {}) }),
   fields: [
     { name: 'reg_number', label: 'Registration number', required: true },
+    { name: 'manager_id', label: 'Manager', type: 'manager', required: true, hint: 'The manager responsible for this car' },
     { name: 'status', label: 'Status', type: 'select', options: ['active', 'in_maintenance', 'inactive', 'handed_over', 'disposed'], required: true },
     { name: 'make', label: 'Make', required: true },
     { name: 'model', label: 'Model', required: true },
@@ -34,7 +38,7 @@ export const vehiclesCfg = ({ dist }) => ({
     { name: 'color', label: 'Colour' },
     { name: 'vin', label: 'VIN / chassis number' },
     { name: 'current_odometer', label: 'Current odometer', type: 'number', hint: 'Updates automatically from trips, fuel and service records' },
-    { name: 'assigned_driver_id', label: 'Assigned driver', type: 'driver' },
+    { name: 'assigned_driver_id', label: 'Driver', type: 'driver', hint: 'Set automatically when you start a contract' },
     { name: 'purchase_date', label: 'Purchase date', type: 'date' },
     { name: 'purchase_price', label: 'Purchase price', type: 'number' },
     { name: 'insurance_expiry', label: 'Insurance expires', type: 'date' },
