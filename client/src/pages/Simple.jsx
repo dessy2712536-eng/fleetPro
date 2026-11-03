@@ -1,11 +1,26 @@
 import { useState } from 'react';
 import { useApp } from '../context';
 import { PageHead, ResourceTable } from '../ui';
+import ImportVehicles from './ImportVehicles';
 import { checkinsCfg, contractsCfg, driversCfg, expensesCfg, fuelCfg, paymentsCfg, recordsCfg, schedulesCfg, tripsCfg, vehiclesCfg } from '../resources';
 
 export function VehiclesPage() {
   const app = useApp();
-  return <><PageHead title="Cars" sub="Every car, who is driving it, and its paperwork." /><ResourceTable cfg={vehiclesCfg(app)} /></>;
+  const [importing, setImporting] = useState(false);
+  const [version, setVersion] = useState(0);
+  return (
+    <>
+      <PageHead title="Cars" sub="Every car, who is driving it, and its paperwork.">
+        {app.can('manager') && <button className="btn ghost" onClick={() => setImporting(true)}>Import cars</button>}
+      </PageHead>
+      <ResourceTable key={version} cfg={vehiclesCfg(app)} />
+      {importing && (
+        <ImportVehicles
+          onClose={() => setImporting(false)}
+          onDone={n => { setVersion(v => v + 1); if (n) app.notify(`${n} car${n === 1 ? '' : 's'} imported`); }} />
+      )}
+    </>
+  );
 }
 
 export function DriversPage() {

@@ -307,3 +307,14 @@ tr.row-short td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
   a { color: inherit; }
   .plate { border-width: 1px; }
 }
+
+/* Import */
+.import .sub { margin: 0 0 12px; }
+.import textarea { font: 13px/1.5 ui-monospace, 'SF Mono', Menlo, monospace; white-space: pre; overflow-x: auto; }
+.import input[type=file] { border: 0; padding: 0; font-size: 13px; }
+.import-count { margin: 14px 0 8px; }
+.import-preview { max-height: 300px; overflow: auto; }
+.import-preview tr.skip td { opacity: 0.6; }
+.import-progress { padding: 8px 0; }
+.import-progress ul { margin: 6px 0 0; padding-left: 18px; font-weight: 400; }
+.progress.big { height: 12px; margin: 8px 0; }

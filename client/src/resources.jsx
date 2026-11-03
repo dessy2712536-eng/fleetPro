@@ -6,7 +6,7 @@ export const VEHICLE_TYPES = ['car', 'suv', 'pickup', 'van', 'truck', 'bus', 'mo
 export const FUEL_TYPES = ['petrol', 'diesel', 'electric', 'hybrid', 'lpg', 'cng', 'other'];
 
 export const vehiclesCfg = ({ dist }) => ({
-  endpoint: '/vehicles', singular: 'Vehicle', exportName: 'vehicles',
+  endpoint: '/vehicles', singular: 'Car', exportName: 'vehicles',
   searchPlaceholder: 'Search plate, make, model, driver',
   rowLink: r => `/vehicles/${r.id}`,
   filters: [
