@@ -1,0 +1,240 @@
+// Run with: node apps-script/dev/test.js
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { loadBackend } = require('./emulator');
+
+const { ctx, book, call } = loadBackend();
+ctx.setup();
+const ok = r => { assert.equal(r.ok, true, JSON.stringify(r)); return r.data; };
+
+const admin = ok(call('POST', '/auth/login', { body: { email: 'ADMIN@fleet.local', password: 'admin12345' } })).token;
+const as = (token, method, p, opts = {}) => call(method, p, { ...opts, token });
+
+test('setup creates tabs with headers', () => {
+  for (const t of ['users', 'vehicles', 'drivers', 'trips', 'fuel_logs', 'expenses', 'maintenance_schedules', 'maintenance_records', 'audit_log', 'settings']) {
+    assert.ok(book.getSheetByName(t), t);
+  }
+  assert.equal(book.getSheetByName('Sheet1'), null);
+  assert.equal(book.getSheetByName('vehicles').getRange(1, 1, 1, 2).getValues()[0].join(), 'id,reg_number');
+});
+
+test('auth', () => {
+  assert.equal(call('POST', '/auth/login', { body: { email: 'admin@fleet.local', password: 'wrong' } }).status, 401);
+  assert.equal(call('GET', '/vehicles').status, 401);
+  assert.equal(call('GET', '/vehicles', { token: admin.slice(0, -3) + 'abc' }).status, 401);
+  assert.equal(ok(as(admin, 'GET', '/auth/me')).user.role, 'admin');
+});
+
+let viewer;
+test('viewer cannot write', () => {
+  ok(as(admin, 'POST', '/users', { body: { name: 'V', email: 'v@x.com', password: 'viewer1234', role: 'viewer' } }));
+  viewer = ok(call('POST', '/auth/login', { body: { email: 'v@x.com', password: 'viewer1234' } })).token;
+  assert.equal(as(viewer, 'GET', '/vehicles').ok, true);
+  assert.equal(as(viewer, 'POST', '/drivers', { body: { name: 'x', status: 'active' } }).status, 403);
+});
+
+let vid, did;
+test('vehicles and drivers with validation and uniqueness', () => {
+  const bad = as(admin, 'POST', '/vehicles', { body: { make: 'Toyota', type: 'rocket' } });
+  assert.equal(bad.status, 422);
+  assert.ok(bad.details.reg_number && bad.details.type);
+  did = ok(as(admin, 'POST', '/drivers', { body: { name: 'Kwame', status: 'active', license_expiry: '2020-01-01' } })).id;
+  const v = ok(as(admin, 'POST', '/vehicles', { body: { reg_number: 'GR-1-24', make: 'Toyota', model: 'Hilux', type: 'pickup', fuel_type: 'diesel', status: 'active', current_odometer: 1000, assigned_driver_id: did, insurance_expiry: '2001-01-01' } }));
+  assert.equal(v.driver_name, 'Kwame');
+  assert.equal(v.current_odometer, 1000);
+  vid = v.id;
+  assert.equal(as(admin, 'POST', '/vehicles', { body: { reg_number: 'gr-1-24', make: 'a', model: 'b', type: 'car', fuel_type: 'petrol', status: 'active' } }).status, 409);
+  // values round-trip through the sheet as typed values
+  const again = ok(as(admin, 'GET', `/vehicles/${vid}`));
+  assert.equal(typeof again.current_odometer, 'number');
+  assert.equal(again.insurance_expiry, '2001-01-01');
+});
+
+test('trips update odometer and enforce rules', () => {
+  assert.equal(as(admin, 'POST', '/trips', { body: { vehicle_id: vid, start_time: '2026-01-01T08:00', start_odometer: 1000, end_odometer: 900, status: 'completed' } }).status, 422);
+  const t = ok(as(admin, 'POST', '/trips', { body: { vehicle_id: vid, driver_id: did, start_time: '2026-01-01T08:00', start_odometer: 1000, end_odometer: 1250, status: 'completed' } }));
+  assert.equal(t.distance, 250);
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${vid}`)).current_odometer, 1250);
+  ok(as(admin, 'POST', '/trips', { body: { vehicle_id: vid, start_time: '2026-01-02T08:00', status: 'in_progress' } }));
+  assert.equal(as(admin, 'POST', '/trips', { body: { vehicle_id: vid, start_time: '2026-01-02T09:00', status: 'in_progress' } }).status, 409);
+  const list = ok(as(admin, 'GET', '/trips', { query: { vehicle_id: vid, sort: 'start_time', dir: 'asc' } }));
+  assert.equal(list.total, 2);
+  assert.equal(list.rows[0].start_time, '2026-01-01T08:00');
+});
+
+test('maintenance resets schedule and toggles vehicle status', () => {
+  const s = ok(as(admin, 'POST', '/maintenance/schedules', { body: { vehicle_id: vid, service_type: 'Oil', interval_km: 200, last_done_odometer: 0 } }));
+  let alerts = ok(as(admin, 'GET', '/alerts')).alerts;
+  assert.ok(alerts.some(a => a.kind === 'service_due' && a.severity === 'overdue'));
+  assert.ok(alerts.some(a => a.kind === 'insurance'));
+  assert.ok(alerts.some(a => a.kind === 'license'));
+  const r = ok(as(admin, 'POST', '/maintenance/records', { body: { vehicle_id: vid, schedule_id: s.id, date: '2026-01-03', odometer: 1300, type: 'service', description: 'Oil change', status: 'in_progress' } }));
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${vid}`)).status, 'in_maintenance');
+  ok(as(admin, 'PUT', `/maintenance/records/${r.id}`, { body: { status: 'completed', cost: 500 } }));
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${vid}`)).status, 'active');
+  assert.equal(ok(as(admin, 'GET', `/maintenance/schedules/${s.id}`)).last_done_odometer, 1300);
+  alerts = ok(as(admin, 'GET', '/alerts')).alerts;
+  assert.ok(!alerts.some(a => a.schedule_id === s.id && a.severity === 'overdue'));
+});
+
+test('reports', () => {
+  ok(as(admin, 'POST', '/fuel', { body: { vehicle_id: vid, date: '2026-01-01', liters: 25, cost: 350, odometer: 1250 } }));
+  ok(as(admin, 'POST', '/expenses', { body: { vehicle_id: vid, date: '2026-01-01', category: 'tolls', amount: 150 } }));
+  const r = ok(as(admin, 'GET', '/reports/vehicles', { query: { from: '2026-01-01', to: '2026-01-31' } })).rows.find(x => x.vehicle_id === vid);
+  assert.equal(r.fuel_cost, 350);
+  assert.equal(r.maintenance_cost, 500);
+  assert.equal(r.total_cost, 1000);
+  assert.ok(r.distance_km >= 250 && r.km_per_liter > 0 && r.cost_per_km > 0);
+  assert.equal(ok(as(admin, 'GET', '/reports/monthly', { query: { from: '2026-01-01', to: '2026-03-31' } })).rows.length, 3);
+});
+
+test('deleting a vehicle removes its records; deleting a driver unlinks them', () => {
+  const d2 = ok(as(admin, 'POST', '/drivers', { body: { name: 'Temp', status: 'active' } })).id;
+  ok(as(admin, 'PUT', `/vehicles/${vid}`, { body: { assigned_driver_id: d2 } }));
+  ok(as(admin, 'DELETE', `/drivers/${d2}`));
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${vid}`)).assigned_driver_id, null);
+  ok(as(admin, 'DELETE', `/vehicles/${vid}`));
+  assert.equal(ok(as(admin, 'GET', '/trips')).total, 0);
+  assert.equal(ok(as(admin, 'GET', '/fuel')).total, 0);
+});
+
+test('settings, users, last admin protection, password change', () => {
+  assert.equal(as(viewer, 'PUT', '/settings', { body: { currency: 'USD' } }).status, 403);
+  assert.equal(ok(as(admin, 'PUT', '/settings', { body: { currency: 'USD', alert_days: 45 } })).currency, 'USD');
+  assert.equal(ok(as(viewer, 'GET', '/settings')).alert_days, '45');
+  const me = ok(as(admin, 'GET', '/auth/me')).user;
+  assert.equal(as(admin, 'PUT', `/users/${me.id}`, { body: { role: 'viewer' } }).status, 400);
+  assert.equal(as(viewer, 'POST', '/auth/change-password', { body: { current_password: 'nope', new_password: 'newpass123' } }).status, 400);
+  ok(as(viewer, 'POST', '/auth/change-password', { body: { current_password: 'viewer1234', new_password: 'newpass123' } }));
+  assert.equal(call('POST', '/auth/login', { body: { email: 'v@x.com', password: 'newpass123' } }).ok, true);
+});
+
+test('work & pay contract: deposit rules, arrears, MoMo references, handover', () => {
+  const { addDays, today, payDays } = { addDays: ctx.addDays, today: ctx.today, payDays: ctx.payDays };
+  const mgr = ok(as(admin, 'POST', '/users', { body: { name: 'Mgr One', email: 'm1@x.com', password: 'manager123', role: 'manager' } }));
+  const mtok = ok(call('POST', '/auth/login', { body: { email: 'm1@x.com', password: 'manager123' } })).token;
+  const drv = ok(as(admin, 'POST', '/drivers', { body: { name: 'Ama Driver', status: 'active', manager_id: mgr.id, momo_number: '0241112222' } }));
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { reg_number: 'GR-100-26', make: 'Toyota', model: 'Vitz', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  const start = addDays(today(), -14);
+  const base = { driver_id: drv.id, vehicle_id: car.id, type: 'work_and_pay', start_date: start, status: 'active', deposit_reference: 'DEP001' };
+
+  // New car needs 15,000; below minimum rejected; reference required
+  let r = as(admin, 'POST', '/contracts', { body: { ...base, deposit_amount: 4000 } });
+  assert.equal(r.status, 422); assert.ok(r.details.deposit_amount);
+  r = as(admin, 'POST', '/contracts', { body: { ...base, deposit_amount: 8000 } });
+  assert.equal(r.status, 422); assert.match(r.details.vehicle_id, /new car/);
+  const c = ok(as(mtok, 'POST', '/contracts', { body: { ...base, deposit_amount: 15000 } }));
+  assert.equal(c.daily_rate, 400);
+  assert.equal(c.end_date, addDays(ctx.addYears(start, 4), -1));
+  assert.equal(c.car_condition, 'new');
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${car.id}`)).assigned_driver_id, drv.id);
+  const due = payDays(start, addDays(today(), -1), 'mon_sat');
+  assert.equal(c.expected_to_date, due * 400);
+  assert.equal(c.arrears, due * 400);
+  assert.ok(c.contract_value > 490000 && c.contract_value < 505000, String(c.contract_value));
+
+  // A second active contract on the same car is blocked
+  const drv2 = ok(as(admin, 'POST', '/drivers', { body: { name: 'Kojo Two', status: 'active', manager_id: mgr.id } }));
+  assert.equal(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: drv2.id, deposit_amount: 15000, deposit_reference: 'DEP002' } }).status, 422);
+
+  // Payments: reference required + unique; reduce arrears; waiver needs a reason
+  assert.equal(as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: start, paid_on: addDays(start, 1), amount: 400 } }).status, 422);
+  const p1 = ok(as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: start, paid_on: addDays(start, 1), amount: 400, momo_reference: 'MP123' } }));
+  assert.equal(p1.recorded_by, 'Mgr One');
+  assert.equal(p1.driver_name, 'Ama Driver');
+  assert.equal(as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: start, paid_on: start, amount: 400, momo_reference: 'mp123' } }).status, 422);
+  assert.equal(as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: start, paid_on: start, amount: 400, momo_reference: 'dep001' } }).status, 422);
+  const twice = as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: start, paid_on: addDays(start, 1), amount: 400, momo_reference: 'MP124' } });
+  assert.equal(twice.status, 422); assert.match(twice.details.work_date, /Already paid/);
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).next_unpaid_day > start, true);
+  assert.equal(as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'waiver', work_date: start, paid_on: start, amount: 800 } }).status, 422);
+  ok(as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'waiver', work_date: addDays(start, 1), paid_on: addDays(start, 2), amount: 800, notes: 'Car in workshop' } }));
+  let cv = ok(as(admin, 'GET', `/contracts/${c.id}`));
+  assert.equal(cv.paid_total, 400);
+  assert.equal(cv.waived_total, 800);
+  assert.equal(cv.arrears, due * 400 - 1200);
+  assert.equal(cv.remaining_balance, cv.contract_value - 400); // waivers don't pay off the car
+
+  // Driver list shows arrears and manager; manager filter works
+  const dl = ok(as(admin, 'GET', '/drivers', { query: { manager_id: mgr.id } }));
+  assert.equal(dl.total, 2);
+  const dv = dl.rows.find(x => x.id === drv.id);
+  assert.equal(dv.manager_name, 'Mgr One'); assert.equal(dv.reg_number, 'GR-100-26'); assert.equal(dv.arrears, cv.arrears);
+
+  // Arrears alert visible to that manager
+  const al = ok(as(mtok, 'GET', '/alerts')).alerts;
+  assert.ok(al.some(a => a.kind === 'arrears' && a.driver_id === drv.id));
+
+  // Check-in: complaint opens, wants to stop raises alert, odometer bumps car
+  const ci = ok(as(mtok, 'POST', '/checkins', { body: { driver_id: drv.id, date: today(), odometer: 5000, car_condition: 'good', intention: 'wants_to_stop', complaint: 'Too much traffic' } }));
+  assert.equal(ci.complaint_status, 'open'); assert.equal(ci.vehicle_id, car.id);
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${car.id}`)).current_odometer, 5000);
+  assert.ok(ok(as(mtok, 'GET', '/alerts')).alerts.some(a => a.kind === 'wants_to_stop'));
+
+  // Manager report (week)
+  const rep = ok(as(mtok, 'GET', '/reports/manager', { query: { period: 'month', date: addDays(today(), -1) } }));
+  assert.equal(rep.manager_id, mgr.id);
+  const row = rep.rows.find(x => x.driver_id === drv.id);
+  assert.ok(row && row.intention === 'wants_to_stop' && row.complaint === 'Too much traffic');
+  assert.equal(rep.summary.wants_to_stop, 1);
+  const day = ok(as(mtok, 'GET', '/reports/manager', { query: { period: 'day', date: start } }));
+  assert.equal(day.rows.find(x => x.driver_id === drv.id).paid, 400);
+  assert.equal(day.rows.find(x => x.driver_id === drv.id).momo_references, 'MP123');
+
+  // Stopping: car freed, driver stopped; retrieved car accepts smaller deposit
+  ok(as(admin, 'PUT', `/contracts/${c.id}`, { body: { status: 'stopped', end_reason: 'Quit' } }));
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${car.id}`)).assigned_driver_id, null);
+  assert.equal(ok(as(admin, 'GET', `/drivers/${drv.id}`)).status, 'stopped');
+  assert.ok(ok(as(admin, 'GET', `/contracts/${c.id}`)).ended_on);
+  const c2 = ok(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: drv2.id, deposit_amount: 8000, deposit_reference: 'DEP003', start_date: today() } }));
+  assert.equal(c2.car_condition, 'retrieved');
+  assert.equal(as(admin, 'DELETE', `/contracts/${c.id}`).status, 409);
+  assert.equal(as(admin, 'DELETE', `/drivers/${drv.id}`).status, 409);
+
+  // Paying the full contract value completes it and hands the car over
+  ok(as(admin, 'POST', '/payments', { body: { contract_id: c2.id, type: 'adjustment', work_date: today(), paid_on: today(), amount: ok(as(admin, 'GET', `/contracts/${c2.id}`)).contract_value, notes: 'test payoff' } }));
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c2.id}`)).status, 'completed');
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${car.id}`)).status, 'handed_over');
+});
+
+test('daily hire rates for Cerio and BYD, no deposit needed', () => {
+  const d1 = ok(as(admin, 'POST', '/drivers', { body: { name: 'EV One', status: 'active' } }));
+  const d2 = ok(as(admin, 'POST', '/drivers', { body: { name: 'EV Two', status: 'active' } }));
+  const cerio = ok(as(admin, 'POST', '/vehicles', { body: { reg_number: 'EV-1', make: 'Cerio', model: 'EV', type: 'car', fuel_type: 'electric', status: 'active' } }));
+  const byd = ok(as(admin, 'POST', '/vehicles', { body: { reg_number: 'EV-2', make: 'BYD', model: 'Dolphin', type: 'car', fuel_type: 'electric', status: 'active' } }));
+  const a = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d1.id, vehicle_id: cerio.id, type: 'daily_hire', start_date: ctx.today(), status: 'active' } }));
+  const b = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d2.id, vehicle_id: byd.id, type: 'daily_hire', start_date: ctx.today(), status: 'active' } }));
+  assert.equal(a.daily_rate, 500); assert.equal(b.daily_rate, 700);
+  assert.equal(a.end_date, null); assert.equal(a.contract_value, null);
+});
+
+test('payDays counts Monday–Saturday', () => {
+  assert.equal(ctx.payDays('2026-11-02', '2026-11-08', 'mon_sat'), 6); // Mon..Sun
+  assert.equal(ctx.payDays('2026-11-08', '2026-11-08', 'mon_sat'), 0); // Sunday
+  assert.equal(ctx.payDays('2026-11-01', '2026-11-30', 'mon_sat'), 25);
+  assert.equal(ctx.payDays('2026-11-01', '2026-11-30', 'every_day'), 30);
+});
+
+test('demo data and dashboard', () => {
+  ctx.loadDemoData();
+  const d = ok(as(admin, 'GET', '/dashboard'));
+  assert.equal(d.fleet_total, 21);
+  assert.equal(d.collections.active_contracts, 20);
+  assert.equal(d.collections.daily.length, 14);
+  assert.ok(d.collections.arrears_total > 0);
+  assert.ok(d.collections.top_arrears.length > 0);
+  assert.equal(d.available_cars.length, 1);
+  assert.ok(d.alert_counts.total > 0);
+  const mtok = ok(call('POST', '/auth/login', { body: { email: 'manager@fleet.local', password: 'demo12345' } })).token;
+  const rep = ok(as(mtok, 'GET', '/reports/manager', { query: { period: 'week' } }));
+  assert.ok(rep.rows.length >= 6 && rep.rows.every(r => r.manager_name === 'Samuel Adjei'));
+  assert.ok(rep.summary.expected > 0 && rep.summary.collection_rate > 50);
+  const all = ok(as(admin, 'GET', '/reports/manager', { query: { period: 'month', manager_id: 'all' } }));
+  assert.equal(all.by_manager.length, 3);
+  const contracts = ok(as(admin, 'GET', '/contracts', { query: { limit: 100 } })).rows;
+  assert.equal(contracts.filter(c => c.car_condition === 'retrieved' && c.status === 'active').length, 2);
+  const good = contracts.find(c => c.driver_name === 'Kwame Asante');
+  assert.ok(Math.abs(good.arrears) <= 1200, `good payer arrears ${good.arrears}`);
+  const bad = contracts.find(c => c.driver_name === 'Michael Agyei');
+  assert.ok(bad.days_behind >= 3, `bad payer behind ${bad.days_behind}`);
+});
