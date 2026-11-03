@@ -233,6 +233,13 @@ test('cars need a manager with the manager role', () => {
   assert.equal(ok(as(admin, 'GET', `/drivers/${drv.id}`)).manager_id, mgr.id);
 });
 
+test('only admins see every car; viewers see none', () => {
+  const vt = ok(call('POST', '/auth/login', { body: { email: 'v@x.com', password: 'newpass123' } })).token;
+  assert.equal(ok(as(vt, 'GET', '/vehicles')).total, 0);
+  assert.equal(ok(as(vt, 'GET', '/dashboard')).fleet_total, 0);
+  assert.ok(ok(as(admin, 'GET', '/vehicles')).total > 0);
+});
+
 test('managers only see and change their own group', () => {
   const mA = ok(as(admin, 'POST', '/users', { body: { name: 'Group A', email: 'ga@x.com', password: 'manager123', role: 'manager' } }));
   const mB = ok(as(admin, 'POST', '/users', { body: { name: 'Group B', email: 'gb@x.com', password: 'manager123', role: 'manager' } }));

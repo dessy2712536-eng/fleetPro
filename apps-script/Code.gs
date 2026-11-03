@@ -913,10 +913,10 @@ function view(res, row, m) { return VIEWS[res.table](row, m || maps()); }
 // ---------- Manager groups ----------
 // A manager sees only their own group: the cars assigned to them and the drivers under them,
 // plus everything attached to those (contracts, payments, check-ins, maintenance, expenses).
-// Admins and viewers see everything.
+// Only admins see the whole fleet; every other account sees only its own group.
 
-/** The manager a user is limited to, or null for admins and viewers. */
-function scopeFor(user) { return user && user.role === 'manager' ? user.id : null; }
+/** The group a user is limited to, or null for admins (who see everything). */
+function scopeFor(user) { return user && user.role !== 'admin' ? user.id : null; }
 
 /** Which manager to report on: managers are always limited to themselves; admins may pick one. */
 function pickManager(q, user) {

@@ -67,7 +67,7 @@ function ChangePassword() {
   );
 }
 
-const ROLE_HELP = 'Viewers can see everything. Managers can also add and change records. Admins can also manage users and settings.';
+const ROLE_HELP = 'Managers see and manage only the cars and drivers assigned to them. Admins see the whole fleet and manage users and settings.';
 
 function Users() {
   const { notify, user: me } = useApp();
@@ -79,7 +79,7 @@ function Users() {
   const fields = [
     { name: 'name', label: 'Name', required: true },
     { name: 'email', label: 'Email', type: 'email', required: true },
-    { name: 'role', label: 'Role', type: 'select', options: ['viewer', 'manager', 'admin'], required: true, hint: ROLE_HELP, span: 2 },
+    { name: 'role', label: 'Role', type: 'select', options: editing?.role === 'viewer' ? ['viewer', 'manager', 'admin'] : ['manager', 'admin'], required: true, hint: ROLE_HELP, span: 2 },
     { name: 'password', label: editing?.id ? 'New password (optional)' : 'Password', type: 'password', required: !editing?.id },
     { name: 'active', label: 'Can sign in', type: 'checkbox' },
   ];
@@ -115,7 +115,7 @@ function Users() {
       </div>
       {editing && (
         <Modal title={editing.id ? `Edit ${editing.name}` : 'Add user'} onClose={() => setEditing(null)}>
-          <RecordForm fields={fields} initial={editing.id ? { ...editing, active: editing.active ? 1 : 0 } : { role: 'viewer', active: 1 }}
+          <RecordForm fields={fields} initial={editing.id ? { ...editing, active: editing.active ? 1 : 0 } : { role: 'manager', active: 1 }}
             onSubmit={save} onCancel={() => setEditing(null)} submitLabel={editing.id ? 'Save changes' : 'Add user'} />
           {editing.id && editing.id !== me.id && <div className="danger-zone"><button className="link-btn danger" onClick={remove}>Delete this user</button></div>}
         </Modal>
