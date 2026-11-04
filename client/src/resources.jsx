@@ -115,7 +115,7 @@ export async function giveCar(driverId, f) {
   return contract;
 }
 
-const DRIVER_KEYS = ['name', 'status', 'arrangement', 'manager_id', 'phone', 'momo_number', 'id_number', 'license_number', 'license_class', 'license_expiry', 'hire_date', 'email', 'notes'];
+const DRIVER_KEYS = ['name', 'status', 'arrangement', 'batch', 'manager_id', 'phone', 'momo_number', 'id_number', 'license_number', 'license_class', 'license_expiry', 'hire_date', 'email', 'notes'];
 
 export const driversCfg = ({ money, user } = {}) => ({
   endpoint: '/drivers', singular: 'Driver', exportName: 'drivers',
@@ -127,6 +127,7 @@ export const driversCfg = ({ money, user } = {}) => ({
     { name: 'status', label: 'Status', options: ['active', 'on_leave', 'stopped'] },
     { name: 'intention', label: 'Latest feedback', options: ['continue', 'undecided', 'wants_to_stop'] },
     { name: 'arrangement', label: 'Arrangement', options: ['work_and_pay', 'daily_hire'] },
+    { name: 'batch', label: 'Batch', options: ['1ST', '2ND', '3RD', 'EV'] },
   ],
   columns: [
     { key: 'name', label: 'Driver', sort: 'name', render: r => <><Link to={`/drivers/${r.id}`} className="strong-link">{r.name}</Link><div className="dim">{r.phone || ''}</div></> },
@@ -189,6 +190,7 @@ export const driversCfg = ({ money, user } = {}) => ({
         : 'Work & pay: the driver pays 400 a day, Monday to Saturday, for 4 years, then owns the car. Needs a security deposit.',
       derive: v => ({ c_type: v }) },
     { name: 'manager_id', label: 'Manager', type: 'manager', hint: 'The manager this driver reports to' },
+    { name: 'batch', label: 'Batch', type: 'select', options: ['1ST', '2ND', '3RD', 'EV'], hint: 'Shown on the monthly CSR report' },
     { name: 'phone', label: 'Phone' },
     { name: 'momo_number', label: 'MTN MoMo number', hint: 'Number the driver pays from' },
     ...carFields()

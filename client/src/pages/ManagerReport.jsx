@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { useApp } from '../context';
 import { Badge, PageHead, Plate, daysAgo, fmtDate, human, useOptions } from '../ui';
+import { csrData, csrFileName, csrWorkbook } from '../csrReport';
 
 const PERIODS = [['day', 'Daily'], ['week', 'Weekly'], ['month', 'Monthly']];
 
@@ -37,6 +38,28 @@ export default function ManagerReport() {
     a.click();
   };
 
+  // Monthly CSR workbook (same layout as the AT_CSR_<MONTH> file): month sheet, SUMMARY, DEFAULT DETAIL.
+  const [csrBusy, setCsrBusy] = useState(false);
+  const exportCsr = async () => {
+    setCsrBusy(true);
+    try {
+      const month = date.slice(0, 7);
+      const q = { manager_id: managerId, limit: 100000 };
+      const [c, p, o] = await Promise.all([
+        api('/contracts', { query: q }), api('/payments', { query: q }), api('/off-days', { query: q }),
+      ]);
+      const today = new Date().toISOString().slice(0, 10);
+      const result = csrData({ contracts: c.rows, payments: p.rows, offDays: o.rows, month, today });
+      const csrName = managerId === 'all' ? 'All managers' : (data && data.manager_name) || (managers.find(m => String(m.value) === managerId) || {}).label || user.name;
+      const { default: writeExcelFile } = await import('write-excel-file/browser');
+      await writeExcelFile(csrWorkbook(result, { csrName, month }), { fontFamily: 'Calibri', fontSize: 11 }).toFile(csrFileName(csrName, month));
+      notify(result.unexplained > 0
+        ? `CSR report downloaded. ${result.unexplained} missed day${result.unexplained === 1 ? ' has' : 's have'} no reason yet – mark them on each driver's daily breakdown and download again.`
+        : 'CSR report downloaded.');
+    } catch (e) { notify(e.message, 'bad'); }
+    setCsrBusy(false);
+  };
+
   const s = data?.summary;
   const periodText = !data ? '' : data.from === data.to
     ? `Payments for work on ${fmtDate(data.from)}`
@@ -47,6 +70,7 @@ export default function ManagerReport() {
       <PageHead title="Manager reports" sub="Payments, balances, car condition, servicing and driver feedback for each manager's drivers.">
         <button className="btn ghost" onClick={() => window.print()} disabled={!data}>Print</button>
         <button className="btn ghost" onClick={exportCsv} disabled={!data}>Export CSV</button>
+        {period === 'month' && <button className="btn primary" onClick={exportCsr} disabled={csrBusy}>{csrBusy ? 'Preparing…' : 'CSR report (Excel)'}</button>}
       </PageHead>
 
       <div className="toolbar no-print">

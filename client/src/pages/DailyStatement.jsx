@@ -1,88 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../context';
-import { Modal, fmtDate, human } from '../ui';
+import { Modal, fmtDate } from '../ui';
+import { REASONS, excusedByDefault, reasonLabel } from '../reasons';
 
-// ---- date helpers (dates are YYYY-MM-DD strings, worked in UTC so time zones can't shift a day) ----
-const addDays = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
-const dow = d => new Date(d + 'T00:00:00Z').getUTCDay(); // 0 = Sunday
-const isPayDay = (d, mode) => mode === 'every_day' || dow(d) !== 0;
-const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const monthName = m => new Date(m + '-01T00:00:00Z').toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
-const MONEY = { daily: 1, adjustment: 1 };
-export const OFF_REASONS = ['sick', 'workshop', 'maintenance', 'accident', 'personal_emergency', 'funeral', 'police', 'other'];
-/** The car was out of action, so the driver isn't asked to pay for these by default. */
-const EXCUSED_BY_DEFAULT = { workshop: 1, maintenance: 1 };
-const reasonLabel = r => ({ police: 'Police / impounded' })[r] || human(r);
+import { DAY, buildStatement, dow, monthName } from '../statement.js';
 
-/**
- * Builds the day-by-day statement for one contract.
- * - Every pay day from the start date to yesterday (drivers pay the day after they work) is due at the daily rate.
- * - Excused days (waivers) are marked off first.
- * - A payment recorded for a day covers that day first. Anything extra (overpayments, money paid before
- *   FleetPro) then goes to the oldest days still unpaid. The total owing is the same either way.
- */
-export function buildStatement(contract, payments, todayStr, offDays = []) {
-  const rate = Number(contract.daily_rate) || 0;
-  const yesterday = addDays(todayStr, -1);
-  const lastWork = payments.map(p => p.work_date).filter(Boolean).sort().slice(-1)[0];
-  let end = lastWork && lastWork > yesterday ? lastWork : yesterday;
-  const stop = [contract.ended_on, contract.end_date].filter(Boolean).sort()[0];
-  if (stop && stop < end) end = stop;
-
-  // Excused days: an excused entry covers (amount ÷ rate) pay days from its work date.
-  const excused = {};
-  payments.filter(p => p.type === 'waiver').forEach(p => {
-    let n = rate ? Math.round(p.amount / rate) : 0;
-    for (let d = p.work_date, i = 0; n > 0 && i < 400; d = addDays(d, 1), i++) {
-      if (isPayDay(d, contract.payment_days)) { excused[d] = p.notes || 'Excused'; n--; }
-    }
-  });
-
-  // Days off: excused ones aren't due; the others are still due but show the reason.
-  const off = {};
-  offDays.forEach(o => { off[o.date] = o; if (o.excused) excused[o.date] = `${reasonLabel(o.reason)} (excused)`; });
-
-  // What was recorded against each day.
-  const recorded = {};
-  payments.filter(p => MONEY[p.type]).forEach(p => { (recorded[p.work_date] = recorded[p.work_date] || []).push(p); });
-
-  const days = [];
-  for (let d = contract.start_date, i = 0; d <= end && i < 4000; d = addDays(d, 1), i++) {
-    const pay = isPayDay(d, contract.payment_days);
-    const recs = recorded[d] || [];
-    if (!pay && !recs.length) continue; // Sundays only appear if something was recorded on them
-    const due = pay && !excused[d] && d <= yesterday ? rate : 0;
-    days.push({ date: d, due, pay, excused: excused[d] || null, off: off[d] || null, recs, recordedAmount: recs.reduce((n, p) => n + Number(p.amount), 0), future: d > yesterday });
-  }
-
-  // 1. Each day's own daily payments cover that day. 2. Extra money goes to the oldest unpaid days.
-  const allMoney = payments.filter(p => MONEY[p.type]).reduce((n, p) => n + Number(p.amount), 0);
-  let pool = allMoney;
-  days.forEach(r => {
-    const own = r.recs.filter(p => p.type === 'daily').reduce((n, p) => n + Number(p.amount), 0);
-    r.covered = Math.min(r.due, own);
-    pool -= r.covered;
-  });
-  days.forEach(r => {
-    const extra = Math.min(r.due - r.covered, Math.max(pool, 0));
-    r.covered += extra;
-    pool -= extra;
-  });
-  let dueSoFar = 0, paidSoFar = 0, coveredSoFar = 0;
-  days.forEach(r => {
-    const covered = r.covered;
-    coveredSoFar += covered;
-    r.coveredSoFar = coveredSoFar;
-    r.status = r.excused ? 'excused' : r.due === 0 ? 'not_due' : covered >= r.due ? 'paid' : covered > 0 ? 'part' : r.off ? 'off_owed' : 'unpaid';
-    dueSoFar += r.due;
-    paidSoFar += r.recordedAmount;
-    r.dueSoFar = dueSoFar;
-    r.paidSoFar = paidSoFar;
-  });
-  const totalDue = dueSoFar;
-  return { days, totalDue, totalPaid: allMoney, balance: totalDue - allMoney, rate, end };
-}
+export { buildStatement };
 
 const STATUS = {
   paid: ['Paid', 'tone-ok'], part: ['Part paid', 'tone-warn'], unpaid: ['Not paid', 'tone-bad'],
@@ -224,7 +148,7 @@ function DayOffForm({ contractId, date, existing, driverName, rate, onClose, onS
   const [note, setNote] = useState(existing ? existing.note || '' : '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const pick = r => { setReason(r); if (!touched) setExcused(!!EXCUSED_BY_DEFAULT[r]); };
+  const pick = r => { setReason(r); if (!touched) setExcused(excusedByDefault(r)); };
   const first = driverName.split(' ')[0];
 
   const save = async e => {
@@ -250,10 +174,10 @@ function DayOffForm({ contractId, date, existing, driverName, rate, onClose, onS
         {error && <div className="form-error" role="alert">{error}</div>}
         <fieldset className="reason-picks">
           <legend>Why didn't {first} work?</legend>
-          {OFF_REASONS.map(r => (
+          {(REASONS.some(r => r.key === reason) || !reason ? REASONS : [...REASONS, { key: reason, label: reasonLabel(reason) }]).map(({ key: r, label, dept }) => (
             <label key={r} className={`reason-pick ${reason === r ? 'on' : ''}`}>
               <input type="radio" name="reason" value={r} checked={reason === r} onChange={() => pick(r)} />
-              {reasonLabel(r)}
+              {label}{dept && dept !== 'DRIVER' && <span className="dim"> · {dept === 'AUTO WORKSHOP' ? 'workshop' : 'admin'}</span>}
             </label>
           ))}
         </fieldset>

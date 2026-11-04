@@ -15,6 +15,7 @@ const HEADERS = {
   manager: ['manager', 'manager name', 'managed by', 'supervisor'],
   car: ['car number', 'car', 'reg no', 'reg number', 'registration', 'number plate', 'plate', 'vehicle number', 'car no'],
   arrangement: ['arrangement', 'type', 'contract type', 'payment type', 'plan'],
+  batch: ['batch', 'batch type', 'batch type (1st/2nd/3rd)'],
   start_date: ['start date', 'started', 'start', 'date started', 'joined'],
   daily_rate: ['daily payment', 'daily rate', 'daily amount', 'rate', 'per day'],
   deposit_amount: ['deposit amount', 'deposit', 'security deposit'],
@@ -26,7 +27,7 @@ const HEADERS = {
 
 export const DRIVER_TEMPLATE_COLUMNS = [
   ['Driver name *', 30], ['Phone', 13], ['MoMo number', 13], ['Ghana Card number', 18], ['Licence number', 15], ['Licence expiry', 14],
-  ['Manager', 16], ['Car number', 13], ['Arrangement', 13], ['Start date', 12], ['Daily payment', 13], ['Deposit amount', 14],
+  ['Manager', 16], ['Car number', 13], ['Arrangement', 13], ['Batch', 9], ['Start date', 12], ['Daily payment', 13], ['Deposit amount', 14],
   ['Deposit MoMo reference', 22], ['Deposit paid on', 15], ['Total paid so far', 16], ['Notes', 30],
 ];
 
@@ -97,6 +98,7 @@ export function parseDriverRows(input) {
       car: car.toUpperCase().replace(/\s+/g, ' '),
       type: !car ? null : /daily|hire/.test(arr) ? 'daily_hire' : 'work_and_pay',
       arrangement: /daily|hire/.test(arr) ? 'daily_hire' : /work|pay|w&p/.test(arr) ? 'work_and_pay' : (car ? 'work_and_pay' : null),
+      batch: (m => (m ? (m[1] ? m[1] + ({ 1: 'ST', 2: 'ND', 3: 'RD' })[m[1]] : 'EV') : null))(get('batch').toUpperCase().match(/^\s*(?:([123])\s*(?:ST|ND|RD)?|(EV))\b/)),
       start_date: date('start_date', 'Start date'),
       daily_rate: money(raw('daily_rate')),
       deposit_amount: money(raw('deposit_amount')),
@@ -215,7 +217,7 @@ export default function ImportDrivers({ onClose, onDone }) {
         let driverId = r.existing && r.existing.id;
         if (!driverId) {
           const d = await api('/drivers', { method: 'POST', body: {
-            name: r.name, phone: r.phone || null, momo_number: r.momo_number || null, id_number: r.id_number, arrangement: r.arrangement,
+            name: r.name, phone: r.phone || null, momo_number: r.momo_number || null, id_number: r.id_number, arrangement: r.arrangement, batch: r.batch,
             license_number: r.license_number, license_expiry: r.license_expiry, manager_id: r.manager_id, status: 'active',
             hire_date: r.start_date, notes: r.notes,
           } });

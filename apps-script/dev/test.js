@@ -359,6 +359,22 @@ test('days off: reasons, excused days not owed, others still owed', () => {
   assert.ok(mb.id);
 });
 
+test('CSR report fields: driver batch and the CSR default reasons', () => {
+  const d = ok(as(admin, 'POST', '/drivers', { body: { name: 'Batch Driver', status: 'active', manager_id: 1, batch: '2ND' } }));
+  assert.equal(d.batch, '2ND');
+  assert.equal(as(admin, 'POST', '/drivers', { body: { name: 'Bad Batch', status: 'active', batch: '4TH' } }).status, 422);
+  assert.ok(ok(as(admin, 'GET', '/drivers', { query: { batch: '2ND', limit: 500 } })).rows.some(x => x.id === d.id));
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'CSR-1', make: 'Livan', model: 'X3 Pro', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  let start = ctx.addDays(ctx.today(), -14);
+  while (new Date(start + 'T00:00:00Z').getUTCDay() !== 1) start = ctx.addDays(start, -1);
+  const c = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d.id, vehicle_id: car.id, type: 'work_and_pay', start_date: start, status: 'active', deposit_amount: 15000, deposit_reference: 'CSR-D' } }));
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).batch, '2ND', 'contracts carry the driver batch for the report');
+  for (const [i, reason] of [[1, 'spare_parts'], [2, 'payment_default'], [3, 'unassigned_car'], [4, 'sick']]) {
+    ok(as(admin, 'POST', '/off-days', { body: { contract_id: c.id, date: ctx.addDays(start, i), reason } }));
+  }
+  assert.equal(as(admin, 'POST', '/off-days', { body: { contract_id: c.id, date: ctx.addDays(start, 5), reason: 'holiday' } }).status, 422);
+});
+
 test('Start again removes everything except admins and settings', () => {
   // runs on a copy so the other tests keep their data
   const { loadBackend } = require('./emulator');

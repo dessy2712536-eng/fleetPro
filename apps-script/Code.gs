@@ -19,8 +19,15 @@ const EXPENSE_CATS = ['tolls', 'parking', 'insurance', 'registration', 'tyres', 
 const MAINT_TYPES = ['service', 'repair', 'inspection', 'tyres', 'bodywork', 'other'];
 
 const vehicleRef = { type: 'ref', table: 'vehicles', label: 'vehicle' };
-/** Why a driver didn't work on a pay day. Workshop and maintenance are excused by default (the car was out of action). */
-const OFF_REASONS = ['sick', 'workshop', 'maintenance', 'accident', 'personal_emergency', 'funeral', 'police', 'other'];
+/**
+ * Why a driver didn't work on a pay day (the DEFAULT REASON list of the monthly CSR report).
+ * Days the workshop or administration is responsible for are excused by default; driver days are still owed.
+ * The older reasons (sick, workshop, …) are still accepted so earlier records stay valid.
+ */
+const OFF_REASONS = ['accident', 'major_repair', 'spare_parts', 'servicing', 'illness', 'personal_emergency', 'payment_default',
+  'impoundment', 'platform_suspension', 'reconciliation', 'unassigned_car',
+  'sick', 'workshop', 'maintenance', 'funeral', 'police', 'other'];
+const BATCHES = ['1ST', '2ND', '3RD', 'EV'];
 const driverRef = { type: 'ref', table: 'drivers', label: 'driver' };
 
 /** Editable fields per table (validation spec). id/created_at/updated_at are added automatically. */
@@ -45,6 +52,7 @@ const FIELDS = {
     hire_date: { type: 'date' },
     status: { type: 'enum', values: ['active', 'on_leave', 'stopped'], required: true },
     arrangement: { type: 'enum', values: ['work_and_pay', 'daily_hire'] },
+    batch: { type: 'enum', values: BATCHES },
     notes: { type: 'string', max: 2000 },
   },
   vehicles: {
@@ -655,7 +663,7 @@ const VIEWS = {
     const d = m.d[r.driver_id] || {}, v = m.v[r.vehicle_id] || {};
     return Object.assign({}, r, contractStats(r, m.pay[r.id]), {
       driver_name: d.name, manager_id: d.manager_id || null, manager_name: m.u[d.manager_id] ? m.u[d.manager_id].name : null,
-      reg_number: v.reg_number, make: v.make, model: v.model,
+      batch: d.batch || null, reg_number: v.reg_number, make: v.make, model: v.model,
       car_condition: Object.keys(m.c).some(k => m.c[k].vehicle_id === r.vehicle_id && m.c[k].id < r.id && m.c[k].driver_id !== r.driver_id) ? 'retrieved' : 'new',
     });
   },
@@ -751,7 +759,7 @@ const RESOURCES = {
         .forEach(c => updateWhere('vehicles', v => v.id === c.vehicle_id && v.manager_id !== row.manager_id, { manager_id: row.manager_id }));
     },
     search: ['name', 'phone', 'momo_number', 'id_number', 'email', 'license_number', 'reg_number', 'manager_name'],
-    filters: { status: 'status', manager_id: 'manager_id', intention: 'intention', arrangement: 'arrangement' },
+    filters: { status: 'status', manager_id: 'manager_id', intention: 'intention', arrangement: 'arrangement', batch: 'batch' },
     sortable: ['name', 'license_expiry', 'status', 'arrears', 'manager_name'],
     defaultSort: ['name', 'asc'],
     describe: r => r.name,
