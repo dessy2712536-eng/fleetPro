@@ -233,6 +233,14 @@ test('cars need a manager with the manager role', () => {
   assert.equal(ok(as(admin, 'GET', `/drivers/${drv.id}`)).manager_id, mgr.id);
 });
 
+test('Ghana Card numbers use GHA-XXXXXXXXX-X and are unique', () => {
+  const a = ok(as(admin, 'POST', '/drivers', { body: { name: 'Card One', status: 'active', id_number: 'gha 123456789 0' } }));
+  assert.equal(a.id_number, 'GHA-123456789-0');
+  assert.equal(as(admin, 'POST', '/drivers', { body: { name: 'Card Two', status: 'active', id_number: 'GHA-12345-6' } }).details.id_number, 'Use the Ghana Card format GHA-123456789-0');
+  assert.match(as(admin, 'POST', '/drivers', { body: { name: 'Card Three', status: 'active', id_number: 'GHA1234567890' } }).details.id_number, /already used by Card One/);
+  assert.equal(ok(as(admin, 'GET', '/drivers', { query: { q: 'GHA-123456789' } })).total, 1);
+});
+
 test('only admins see every car; viewers see none', () => {
   const vt = ok(call('POST', '/auth/login', { body: { email: 'v@x.com', password: 'newpass123' } })).token;
   assert.equal(ok(as(vt, 'GET', '/vehicles')).total, 0);

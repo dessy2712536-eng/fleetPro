@@ -1,4 +1,4 @@
-import { Badge, ExpiryCell, Plate, cachedOption, daysAgo, fmtDate, fmtDateTime, human, nowLocal, todayStr } from './ui';
+import { Badge, ExpiryCell, GHANA_CARD_RE, Plate, cachedOption, daysAgo, fmtDate, fmtDateTime, human, nowLocal, todayStr } from './ui';
 import { Link } from 'react-router-dom';
 import { api, ApiError } from './api';
 
@@ -108,7 +108,7 @@ const DRIVER_KEYS = ['name', 'status', 'manager_id', 'phone', 'momo_number', 'id
 
 export const driversCfg = ({ money, user } = {}) => ({
   endpoint: '/drivers', singular: 'Driver', exportName: 'drivers',
-  searchPlaceholder: 'Search name, phone, MoMo number, car',
+  searchPlaceholder: 'Search name, phone, Ghana Card, car',
   rowLink: r => `/drivers/${r.id}`,
   initialFilters: mineFirst(user),
   filters: [
@@ -131,6 +131,10 @@ export const driversCfg = ({ money, user } = {}) => ({
   // so pressing Save again never creates the same driver twice.
   save: async (form, editing) => {
     const body = Object.fromEntries(DRIVER_KEYS.filter(k => k in form).map(k => [k, form[k]]));
+    if (body.id_number === 'GHA-' || body.id_number === '') body.id_number = null;
+    if (body.id_number && !GHANA_CARD_RE.test(body.id_number)) {
+      throw new ApiError(422, 'Please fix the highlighted fields', { id_number: 'Use the format GHA-123456789-0 (10 digits)' });
+    }
     if (editing && editing.id) { await api(`/drivers/${editing.id}`, { method: 'PUT', body }); return 'Driver updated'; }
     if (form.car_id && !body.hire_date) body.hire_date = form.c_start_date;
     const driver = await api('/drivers', { method: 'POST', body });
@@ -151,7 +155,7 @@ export const driversCfg = ({ money, user } = {}) => ({
     { name: 'momo_number', label: 'MTN MoMo number', hint: 'Number the driver pays from' },
     ...carFields().map(f => ({ ...f, showIf: form => !!form.__new && (!f.showIf || f.showIf(form)) })),
     { name: 'details_heading', type: 'heading', label: 'Licence and other details', showIf: form => !!form.__new },
-    { name: 'id_number', label: 'Ghana Card number' },
+    { name: 'id_number', label: 'Ghana Card number', type: 'ghanacard', hint: 'Format GHA-XXXXXXXXX-X. Type the 10 digits; the rest is added for you' },
     { name: 'license_number', label: 'Licence number' },
     { name: 'license_class', label: 'Licence class' },
     { name: 'license_expiry', label: 'Licence expires', type: 'date' },

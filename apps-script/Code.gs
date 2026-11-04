@@ -649,12 +649,20 @@ const RESOURCES = {
       readAll('contracts').filter(c => c.driver_id === row.id && c.status === 'active')
         .forEach(c => updateWhere('vehicles', v => v.id === c.vehicle_id && v.manager_id !== row.manager_id, { manager_id: row.manager_id }));
     },
-    search: ['name', 'phone', 'momo_number', 'email', 'license_number', 'reg_number', 'manager_name'],
+    search: ['name', 'phone', 'momo_number', 'id_number', 'email', 'license_number', 'reg_number', 'manager_name'],
     filters: { status: 'status', manager_id: 'manager_id', intention: 'intention' },
     sortable: ['name', 'license_expiry', 'status', 'arrears', 'manager_name'],
     defaultSort: ['name', 'asc'],
     describe: r => r.name,
-    check: d => { requireManagerUser(d.manager_id); },
+    prepare: d => { if (d.id_number) d.id_number = normalizeGhanaCard(d.id_number) || d.id_number; },
+    check: (d, prev) => {
+      requireManagerUser(d.manager_id);
+      if (d.id_number) {
+        if (!GHANA_CARD_RE.test(d.id_number)) throw invalid('id_number', 'Use the Ghana Card format GHA-123456789-0');
+        const dup = readAll('drivers').find(x => x.id !== (prev ? prev.id : -1) && x.id_number === d.id_number);
+        if (dup) throw invalid('id_number', `This Ghana Card number is already used by ${dup.name}`);
+      }
+    },
     beforeDelete: id => {
       if (readAll('contracts').some(c => c.driver_id === id)) throw new HttpError(409, 'This driver has contract and payment history. Set their status to Stopped instead of deleting them.');
     },
@@ -890,6 +898,14 @@ Object.assign(RESOURCES, {
     describe: r => `${r.driver_name}: ${r.intention.replace(/_/g, ' ')}${r.complaint ? ' – complaint' : ''}`,
   },
 });
+
+/** Ghana Card: GHA-, nine digits, a dash, then one check digit. */
+const GHANA_CARD_RE = /^GHA-\d{9}-\d$/;
+/** "gha 1234567890", "GHA1234567890" or "123456789-0" → "GHA-123456789-0"; null if it isn't 10 digits. */
+function normalizeGhanaCard(v) {
+  const d = String(v || '').toUpperCase().replace(/^\s*GHA/, '').replace(/\D/g, '');
+  return d.length === 10 ? `GHA-${d.slice(0, 9)}-${d.slice(9)}` : null;
+}
 
 /** A car's manager must be an active user with the Manager or Admin role. */
 function requireManagerUser(id) {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../context';
-import { Modal, Plate, fmtDate, invalidateOptions, useOptions } from '../ui';
+import { Modal, Plate, fmtDate, invalidateOptions, normalizeGhanaCard, useOptions } from '../ui';
 import { splitLine, toISODate } from './ImportVehicles';
 
 // Column names people commonly use, mapped to FleetPro fields.
@@ -37,7 +37,7 @@ export async function downloadDriverTemplate() {
     [{ value: 'How to fill in the FleetPro driver list', fontWeight: 'bold', height: 24 }],
     [''],
     ['1. Use the "Drivers" sheet. One driver per row, starting on row 2. Keep the header row as it is.'],
-    ['2. Only the driver name is required. Phone numbers: type them with the leading 0, e.g. 0244123456.'],
+    ['2. Only the driver name is required. Phone numbers: type them with the leading 0, e.g. 0244123456. Ghana Card: GHA-XXXXXXXXX-X, e.g. GHA-123456789-0.'],
     ['3. To give the driver a car at the same time, fill in Car number, Arrangement and Start date. The car must already be in FleetPro (Cars → Import cars).'],
     ['4. Arrangement: "Work & pay" (daily payments for 4 years, driver owns the car) or "Daily hire" (e.g. Cerio, BYD). Leave Daily payment empty for the standard rate.'],
     ['5. Work & pay needs the Deposit amount and the Deposit MoMo reference. New cars need the full new-car deposit (15,000); retrieved cars from 5,000.'],
@@ -90,7 +90,7 @@ export function parseDriverRows(input) {
       name: titleCase(get('name').replace(/\s+/g, ' ')),
       phone: fixPhone(raw('phone')),
       momo_number: fixPhone(raw('momo_number')) || fixPhone(raw('phone')),
-      id_number: get('id_number') || null,
+      id_number: get('id_number') ? (normalizeGhanaCard(get('id_number')) || get('id_number')) : null,
       license_number: get('license_number') || null,
       license_expiry: date('license_expiry', 'Licence expiry'),
       manager_text: get('manager'),
@@ -138,7 +138,7 @@ export default function ImportDrivers({ onClose, onDone }) {
 
   const minDeposit = Number(settings.deposit_min) || 5000;
   const findManager = name => managers.find(m => m.label.trim().toLowerCase() === name.trim().toLowerCase());
-  const carsSeen = new Map(), refsSeen = new Map(), phonesSeen = new Map();
+  const carsSeen = new Map(), refsSeen = new Map(), phonesSeen = new Map(), cardsSeen = new Map();
   const checked = rows.map(r => {
     const problems = [];
     const fromFile = r.manager_text ? findManager(r.manager_text) : null;
@@ -153,6 +153,10 @@ export default function ImportDrivers({ onClose, onDone }) {
     if (r.badDates.length) problems.push(`Check date: ${r.badDates.join(', ')}`);
     if (r.phone && phonesSeen.has(r.phone)) problems.push('Phone number listed twice');
     if (r.phone) phonesSeen.set(r.phone, 1);
+    if (r.id_number && !/^GHA-\d{9}-\d$/.test(r.id_number)) problems.push(`Ghana Card "${r.id_number}" should look like GHA-123456789-0`);
+    if (r.id_number && cardsSeen.has(r.id_number)) problems.push('Ghana Card listed twice');
+    if (r.id_number) cardsSeen.set(r.id_number, 1);
+    if (r.id_number && ctx && ctx.drivers.some(d => d.id_number === r.id_number && !(existing && d.id === existing.id))) problems.push('Ghana Card already used by another driver');
 
     let carStatus = null;
     if (r.car) {

@@ -4,6 +4,20 @@ import { api, downloadCsv } from './api';
 import { useApp } from './context';
 
 const ACRONYMS = { suv: 'SUV', lpg: 'LPG', cng: 'CNG', mon_sat: 'Mon–Sat', every_day: 'Every day', work_and_pay: 'Work & pay', none: 'No complaint', continue: 'Continuing', daily: 'Daily payment', waiver: 'Excused days' };
+/** Ghana Card: "gha 1234567890" → "GHA-123456789-0". Returns null unless there are exactly 10 digits. */
+export const normalizeGhanaCard = v => {
+  const d = String(v ?? '').toUpperCase().replace(/^\s*GHA/, '').replace(/\D/g, '');
+  return d.length === 10 ? `GHA-${d.slice(0, 9)}-${d.slice(9)}` : null;
+};
+export const GHANA_CARD_RE = /^GHA-\d{9}-\d$/;
+/** Formats as the user types: digits only, GHA- added in front and a dash before the last digit. */
+const formatGhanaCardTyping = v => {
+  const raw = String(v ?? '').toUpperCase();
+  const d = raw.replace(/^\s*G?H?A?-?/, '').replace(/\D/g, '').slice(0, 10);
+  if (!d) return /^[GHA-]*$/.test(raw) ? raw.slice(0, 4) : '';
+  return `GHA-${d.slice(0, 9)}${d.length > 9 ? '-' + d.slice(9) : ''}`;
+};
+
 export const human = v => (v == null || v === '' ? '—' : ACRONYMS[v] || String(v).replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase()));
 export const fmtDate = v => (v ? new Date(v.length === 10 ? v + 'T00:00' : v).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 export const fmtDateTime = v => (v ? new Date(v).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
@@ -128,6 +142,12 @@ export function Field({ f, value, onChange, error, form }) {
       break;
     case 'vehicle': case 'driver': case 'schedule': case 'contract': case 'manager':
       input = <RefSelect {...common} kind={f.type} value={value} onChange={onChange} filterVehicle={form?.vehicle_id} onlyManager={f.onlyManager} onlyFree={f.onlyFree} />;
+      break;
+    case 'ghanacard':
+      input = (
+        <input {...common} type="text" inputMode="numeric" autoComplete="off" placeholder="GHA-XXXXXXXXX-X" maxLength={15}
+          value={value ?? ''} onChange={e => onChange(formatGhanaCardTyping(e.target.value))} />
+      );
       break;
     case 'heading':
       return <div className="form-heading span-2"><h3>{f.label}</h3>{f.hint && <small className="hint">{f.hint}</small>}</div>;

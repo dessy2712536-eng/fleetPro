@@ -156,7 +156,7 @@ export function DriverDetail() {
   const ciCfg = checkinsCfg(app);
 
   const save = async form => {
-    await api(`/drivers/${id}`, { method: 'PUT', body: form });
+    await cfg.save(form, { id: Number(id) });
     notify('Driver updated'); setEditing(false); invalidateOptions(); refresh();
   };
   const remove = async () => {
@@ -197,6 +197,7 @@ export function DriverDetail() {
             <div><dt>Ends</dt><dd>{contract.end_date ? fmtDate(contract.end_date) : 'Ongoing'}</dd></div>
             <div><dt>Deposit</dt><dd>{contract.deposit_amount ? <>{money(contract.deposit_amount)} <span className="dim mono">{contract.deposit_reference}</span></> : '—'}</dd></div>
             <div><dt>MoMo number</dt><dd>{d.momo_number || '—'}</dd></div>
+            <div><dt>Ghana Card</dt><dd>{d.id_number || '—'}</dd></div>
             <div><dt>Last paid</dt><dd>{contract.last_payment_on ? fmtDate(contract.last_payment_on) : 'No payments yet'}</dd></div>
             <div><dt>Licence expires</dt><dd><ExpiryCell date={d.license_expiry} /></dd></div>
           </dl>
