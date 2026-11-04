@@ -74,12 +74,15 @@ export const carFields = ({ withHeading = true } = {}) => [
     } },
   { name: 'c_type', label: 'Arrangement', type: 'select', options: ['work_and_pay', 'daily_hire'], required: true, showIf: hasCar, hint: 'Work & pay: driver owns the car after the term. Daily hire: e.g. Cerio, BYD' },
   { name: 'c_start_date', label: 'Start date', type: 'date', required: true, showIf: hasCar },
+  { name: 'c_onboarding', label: 'New or existing driver?', type: 'select', options: ['new_driver', 'existing_driver'], required: true, showIf: hasCar,
+    hint: f => f.c_onboarding === 'existing_driver' ? 'Already driving for you before FleetPro: enter their start date, deposit and what they have paid so far' : 'Starting now, with nothing paid yet' },
+  { name: 'c_paid_so_far', label: 'Total paid so far', type: 'number', showIf: f => hasCar(f) && f.c_onboarding === 'existing_driver', hint: 'All their daily payments up to yesterday, so they don\'t show as owing for days already paid' },
   { name: 'c_daily_rate', label: 'Daily payment', type: 'number', showIf: hasCar, hint: 'Leave empty for the standard rate (400 work & pay, Cerio 500, BYD 700)' },
-  { name: 'c_deposit_amount', label: 'Security deposit', type: 'number', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay', hint: f => depositHint(cachedOption('vehicle', f.car_id)) },
+  { name: 'c_deposit_amount', label: 'Security deposit', type: 'number', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay', hint: f => f.c_onboarding === 'existing_driver' ? 'The deposit they paid when they started (at least 5,000)' : depositHint(cachedOption('vehicle', f.car_id)) },
   { name: 'c_deposit_reference', label: 'Deposit MoMo reference', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
   { name: 'c_deposit_date', label: 'Deposit paid on', type: 'date', showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
 ];
-export const carDefaults = () => ({ c_type: 'work_and_pay', c_start_date: todayStr(), c_deposit_date: todayStr() });
+export const carDefaults = () => ({ c_type: 'work_and_pay', c_onboarding: 'new_driver', c_start_date: todayStr(), c_deposit_date: todayStr() });
 
 // Contract errors come back with contract field names; show them on the matching form fields.
 const CONTRACT_TO_FORM = { vehicle_id: 'car_id', driver_id: 'car_id', type: 'c_type', start_date: 'c_start_date', daily_rate: 'c_daily_rate', deposit_amount: 'c_deposit_amount', deposit_reference: 'c_deposit_reference', deposit_date: 'c_deposit_date', end_date: 'c_start_date' };
@@ -94,6 +97,7 @@ export async function giveCar(driverId, f) {
       daily_rate: f.c_daily_rate || null, payment_days: 'mon_sat',
       deposit_amount: isWP ? f.c_deposit_amount : null, deposit_reference: isWP ? f.c_deposit_reference : null,
       deposit_date: isWP ? (f.c_deposit_date || f.c_start_date) : null,
+      onboarding: f.c_onboarding || 'new_driver',
     } });
   } catch (e) {
     const details = {};

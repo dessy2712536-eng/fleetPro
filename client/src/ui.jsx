@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, downloadCsv } from './api';
 import { useApp } from './context';
 
-const ACRONYMS = { suv: 'SUV', lpg: 'LPG', cng: 'CNG', mon_sat: 'Mon–Sat', every_day: 'Every day', work_and_pay: 'Work & pay', none: 'No complaint', continue: 'Continuing', daily: 'Daily payment', waiver: 'Excused days' };
+const ACRONYMS = { new_driver: 'New driver', existing_driver: 'Existing driver (before FleetPro)', suv: 'SUV', lpg: 'LPG', cng: 'CNG', mon_sat: 'Mon–Sat', every_day: 'Every day', work_and_pay: 'Work & pay', none: 'No complaint', continue: 'Continuing', daily: 'Daily payment', waiver: 'Excused days' };
 /** Ghana Card: "gha 1234567890" → "GHA-123456789-0". Returns null unless there are exactly 10 digits. */
 export const normalizeGhanaCard = v => {
   const d = String(v ?? '').toUpperCase().replace(/^\s*GHA/, '').replace(/\D/g, '');

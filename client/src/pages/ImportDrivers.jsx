@@ -228,6 +228,7 @@ export default function ImportDrivers({ onClose, onDone }) {
               driver_id: driverId, vehicle_id: r.vehicle.id, type: r.type, status: 'active', start_date: r.start_date,
               daily_rate: r.daily_rate, deposit_amount: r.deposit_amount, deposit_reference: r.deposit_reference,
               deposit_date: r.deposit_date || r.start_date, payment_days: 'mon_sat',
+              onboarding: (r.paid_so_far > 0 || (r.start_date && r.start_date < todayISO())) ? 'existing_driver' : 'new_driver',
             } });
           } catch (e) {
             throw new Error(`driver added, but the car wasn't given: ${e.message}${e.details && Object.values(e.details).length ? ' – ' + Object.values(e.details).join(', ') : ''}`);

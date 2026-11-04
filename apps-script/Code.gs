@@ -129,6 +129,8 @@ const FIELDS = {
     daily_rate: { type: 'number', min: 1 },
     payment_days: { type: 'enum', values: ['mon_sat', 'every_day'], default: 'mon_sat' },
     total_price: { type: 'number', min: 1 },
+    // existing_driver: was already driving for the company before FleetPro (their paperwork may predate the new/retrieved rule)
+    onboarding: { type: 'enum', values: ['new_driver', 'existing_driver'] },
     deposit_amount: { type: 'number', min: 0 },
     deposit_reference: { type: 'string', max: 60 },
     deposit_date: { type: 'date' },
@@ -853,7 +855,7 @@ Object.assign(RESOURCES, {
         if (d.deposit_amount == null) throw invalid('deposit_amount', `Work & pay needs a security deposit (from ${money(min)})`);
         if (d.deposit_amount < min) throw invalid('deposit_amount', `The minimum deposit is ${money(min)}`);
         if (!d.deposit_reference) throw invalid('deposit_reference', 'Enter the MoMo reference for the deposit');
-        if (!isRetrievedCar(d.vehicle_id, prev ? prev.id : null, d.driver_id) && d.deposit_amount < newCar) {
+        if (d.onboarding !== 'existing_driver' && !isRetrievedCar(d.vehicle_id, prev ? prev.id : null, d.driver_id) && d.deposit_amount < newCar) {
           throw invalid('vehicle_id', `This is a new car: it needs a deposit of ${money(newCar)}. Deposits below that get a retrieved car.`);
         }
       }

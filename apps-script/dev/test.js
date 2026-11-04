@@ -310,6 +310,16 @@ test('cars start new; become retrieved for the next different driver', () => {
   assert.equal(ok(as(admin, 'GET', '/vehicles', { query: { condition: 'retrieved', limit: 500 } })).rows.some(x => x.id === car.id), true);
 });
 
+test('existing drivers keep the deposit they actually paid', () => {
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'EX-1', make: 'Livan', model: 'X3 Pro', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  const d = ok(as(admin, 'POST', '/drivers', { body: { name: 'Old Hand', status: 'active', manager_id: 1 } }));
+  const base = { driver_id: d.id, vehicle_id: car.id, type: 'work_and_pay', start_date: '2026-06-01', status: 'active', deposit_amount: 8000, deposit_reference: 'EX-D1' };
+  assert.equal(as(admin, 'POST', '/contracts', { body: { ...base, onboarding: 'new_driver' } }).status, 422);
+  assert.equal(as(admin, 'POST', '/contracts', { body: { ...base, onboarding: 'existing_driver', deposit_amount: 4000 } }).status, 422, 'still at least the minimum');
+  const c = ok(as(admin, 'POST', '/contracts', { body: { ...base, onboarding: 'existing_driver' } }));
+  assert.equal(c.onboarding, 'existing_driver');
+});
+
 test('payDays counts Monday–Saturday', () => {
   assert.equal(ctx.payDays('2026-11-02', '2026-11-08', 'mon_sat'), 6); // Mon..Sun
   assert.equal(ctx.payDays('2026-11-08', '2026-11-08', 'mon_sat'), 0); // Sunday
