@@ -240,26 +240,28 @@ function amountHint(f, money) {
 }
 
 export const paymentsCfg = ({ money, user }) => ({
-  endpoint: '/payments', singular: 'Payment', exportName: 'payments', dateRange: true,
+  endpoint: '/payments', singular: 'Payment', addLabel: 'Record payment', addedMessage: 'Payment recorded', exportName: 'payments', dateRange: true,
   searchPlaceholder: 'Search MoMo reference, driver, car',
   initialFilters: mineFirst(user),
   filters: [
     { name: 'manager_id', label: 'Manager', ref: 'manager' },
     { name: 'type', label: 'Type', options: ['daily', 'waiver', 'adjustment'] },
+    { name: 'vehicle_id', label: 'Car', ref: 'vehicle' },
     { name: 'driver_id', label: 'Driver', ref: 'driver' },
   ],
   columns: [
     { key: 'paid_on', label: 'Paid on', sort: 'paid_on', render: r => fmtDate(r.paid_on) },
     { key: 'work_date', label: 'For work on', sort: 'work_date', render: r => fmtDate(r.work_date) },
-    { key: 'driver_name', label: 'Driver', sort: 'driver_name', hideIn: 'driver_id', render: r => <><Link to={`/drivers/${r.driver_id}`} className="strong-link">{r.driver_name}</Link><div className="dim">{r.manager_name || ''}</div></> },
     { key: 'reg_number', label: 'Car', hideIn: 'vehicle_id', render: r => <Plate to={`/vehicles/${r.vehicle_id}`}>{r.reg_number}</Plate> },
+    { key: 'driver_name', label: 'Driver', sort: 'driver_name', hideIn: 'driver_id', render: r => <><Link to={`/drivers/${r.driver_id}`} className="strong-link">{r.driver_name}</Link><div className="dim">{r.manager_name || ''}</div></> },
     { key: 'momo_reference', label: 'MoMo reference', render: r => r.momo_reference ? <><span className="mono">{r.momo_reference}</span><div className="dim">{r.momo_number || ''}</div></> : <span className="dim">{r.type === 'daily' ? '—' : human(r.type)}</span> },
     { key: 'amount', label: 'Amount', num: true, sort: 'amount', render: r => <><strong className={r.type === 'waiver' ? 'txt-warn' : ''}>{money(r.amount)}</strong>{r.type !== 'daily' && <div className="dim">{human(r.type)}</div>}</> },
     { key: 'recorded_by', label: 'Recorded by', render: r => <>{r.recorded_by || '—'}{r.notes && <div className="dim">{r.notes}</div>}</> },
   ],
   defaults: () => ({ type: 'daily', paid_on: todayStr(), work_date: daysAgo(1) }),
   fields: [
-    { name: 'contract_id', label: 'Driver and car', type: 'contract', required: true, span: 2,
+    { name: 'contract_id', label: 'Car', type: 'paycar', required: true, span: 2,
+      hint: f => f.contract_id ? `Driver: ${(cachedOption('contract', f.contract_id) || {}).driver_name || '—'}` : 'Pick the car the payment is for. Its driver and usual daily payment are filled in for you',
       // Work & pay is a fixed 400, so it's filled in. Daily hire drivers pay what they made, so the amount is left for the manager to type.
       derive: (v, form) => {
         const o = cachedOption('contract', v);

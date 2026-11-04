@@ -94,6 +94,41 @@ export function useOptions(kind) {
   return opts;
 }
 
+/**
+ * Payment form: lists every car the user can see. Picking a car selects its current driver's contract
+ * (the field's value is the contract id). Cars without a driver are listed but can't be picked.
+ */
+function PayCarPick({ value, onChange, ...rest }) {
+  const { user } = useApp();
+  const cars = useOptions('vehicle').filter(o => o.status !== 'disposed' && o.status !== 'handed_over');
+  const contracts = useOptions('contract');
+  const byCar = new Map(contracts.filter(c => c.status === 'active').map(c => [c.vehicle_id, c]));
+  const fmt = n => Number(n).toLocaleString();
+  const carLabel = o => `${o.reg_number} · ${o.make} ${o.model}`;
+  const ready = cars.filter(o => byCar.has(o.value)).sort((a, b) => a.reg_number.localeCompare(b.reg_number));
+  const notReady = cars.filter(o => !byCar.has(o.value)).sort((a, b) => a.reg_number.localeCompare(b.reg_number));
+  // When editing an old payment whose contract has ended, keep it selectable.
+  const current = value && !ready.some(o => byCar.get(o.value).value === value) ? contracts.find(c => c.value === value) : null;
+  return (
+    <select value={value ?? ''} onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} {...rest}>
+      <option value="">{cars.length ? 'Select car…' : 'No cars yet'}</option>
+      {current && <option value={current.value}>{current.label}</option>}
+      {ready.length > 0 && (
+        <optgroup label={`${user.role === 'manager' ? 'Your cars' : 'Cars'} with a driver (${ready.length})`}>
+          {ready.map(o => { const c = byCar.get(o.value); return (
+            <option key={o.value} value={c.value}>{carLabel(o)} – {c.driver_name} ({c.type === 'daily_hire' ? 'daily hire' : 'work & pay'}, {fmt(c.daily_rate)}/day)</option>
+          ); })}
+        </optgroup>
+      )}
+      {notReady.length > 0 && (
+        <optgroup label={`Can't take payments yet (${notReady.length})`}>
+          {notReady.map(o => <option key={o.value} value="" disabled>{carLabel(o)} – {o.assigned_driver_id ? `${o.driver_name || 'driver'}: set up contract first` : 'no driver'}</option>)}
+        </optgroup>
+      )}
+    </select>
+  );
+}
+
 /** Every car the user can see. Free cars can be picked; cars that already have a driver are shown but greyed out. */
 function CarPick({ value, onChange, allowDriverId, ...rest }) {
   const { user } = useApp();
@@ -136,6 +171,9 @@ export function Field({ f, value, onChange, error, form }) {
           {f.options.map(o => <option key={o} value={o}>{human(o)}</option>)}
         </select>
       );
+      break;
+    case 'paycar':
+      input = <PayCarPick {...common} value={value} onChange={onChange} />;
       break;
     case 'carpick':
       input = <CarPick {...common} value={value} onChange={onChange} allowDriverId={f.allowDriverId} />;
@@ -257,7 +295,7 @@ export function ResourceTable({ cfg, fixed: fixedProp = NO_FIXED, embedded = fal
     if (cfg.save) message = await cfg.save(body, editing);
     else if (editing.id) await api(`${cfg.endpoint}/${editing.id}`, { method: 'PUT', body });
     else await api(cfg.endpoint, { method: 'POST', body });
-    notify(message || (editing.id ? `${cfg.singular} updated` : `${cfg.singular} added`));
+    notify(message || (editing.id ? `${cfg.singular} updated` : (cfg.addedMessage || `${cfg.singular} added`)));
     setEditing(null);
     invalidateOptions();
     load();
@@ -292,7 +330,7 @@ export function ResourceTable({ cfg, fixed: fixedProp = NO_FIXED, embedded = fal
         )}
         <span className="spacer" />
         {!embedded && <button className="btn ghost" onClick={() => downloadCsv(cfg.endpoint, query, `${cfg.exportName || 'export'}.csv`).catch(e => notify(e.message, 'bad'))}>Export CSV</button>}
-        {writable && <button className="btn primary" onClick={() => setEditing({})}>Add {cfg.singular.toLowerCase()}</button>}
+        {writable && <button className="btn primary" onClick={() => setEditing({})}>{cfg.addLabel || `Add ${cfg.singular.toLowerCase()}`}</button>}
       </div>
 
       {error && <div className="form-error">{error}</div>}
@@ -339,13 +377,13 @@ export function ResourceTable({ cfg, fixed: fixedProp = NO_FIXED, embedded = fal
       )}
 
       {editing && (
-        <Modal title={editing.id ? `Edit ${cfg.singular.toLowerCase()}` : `Add ${cfg.singular.toLowerCase()}`} onClose={() => setEditing(null)} wide={fields.length > 8}>
+        <Modal title={editing.id ? `Edit ${cfg.singular.toLowerCase()}` : (cfg.addLabel || `Add ${cfg.singular.toLowerCase()}`)} onClose={() => setEditing(null)} wide={fields.length > 8}>
           <RecordForm
             fields={fields}
             initial={editing.id ? pick(editing, cfg.fields) : { ...(cfg.defaults?.() || {}), ...fixed }}
             onSubmit={f => save({ ...f, ...fixed })}
             onCancel={() => setEditing(null)}
-            submitLabel={editing.id ? 'Save changes' : `Add ${cfg.singular.toLowerCase()}`}
+            submitLabel={editing.id ? 'Save changes' : (cfg.addLabel || `Add ${cfg.singular.toLowerCase()}`)}
           />
           {editing.id && (
             <div className="danger-zone"><button className="link-btn danger" onClick={() => remove(editing)}>Delete this {cfg.singular.toLowerCase()}</button></div>

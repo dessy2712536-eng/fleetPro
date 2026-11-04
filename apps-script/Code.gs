@@ -200,10 +200,29 @@ function ss() {
   return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
 }
 
+const _checked = {};
 function sheetFor(table) {
   const sh = ss().getSheetByName(table);
   if (!sh) throw new HttpError(500, `Missing sheet tab "${table}". Run setup() in Apps Script.`);
+  // After a script update a tab may be missing new columns. Add them before anything is written,
+  // so updating the code never shifts data into the wrong columns, even if setup() wasn't re-run.
+  if (!_checked[table] && FIELDS[table]) { _checked[table] = true; syncColumns(table, sh); }
   return sh;
+}
+
+function syncColumns(table, sh) {
+  const cols = columnsOf(table);
+  const lastCol = sh.getLastColumn();
+  const existing = lastCol ? sh.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  if (existing.join('|') === cols.join('|')) return;
+  if (sh.getLastRow() > 1 && existing.length) {
+    const rows = readAll(table); // reads by the old header, so every value keeps its name
+    sh.getRange(1, 1, 1, cols.length).setValues([cols]);
+    writeAll(table, rows);
+  } else {
+    sh.getRange(1, 1, 1, cols.length).setValues([cols]);
+  }
+  sh.getRange(1, 1, 1, cols.length).setFontWeight('bold').setBackground('#263035').setFontColor('#ffffff');
 }
 
 /** Convert a raw cell to a typed value. Sheets may turn text into Dates, so normalise. */
@@ -1661,16 +1680,8 @@ function setup() {
     if (!sh) sh = s.insertSheet(t);
     const cols = columnsOf(t);
     // Add any missing columns without disturbing existing data.
-    const existing = sh.getLastColumn() ? sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0] : [];
-    if (existing.join('|') !== cols.join('|')) {
-      if (sh.getLastRow() > 1 && existing.length) {
-        const rows = readAll(t);
-        sh.getRange(1, 1, 1, cols.length).setValues([cols]);
-        writeAll(t, rows);
-      } else {
-        sh.getRange(1, 1, 1, cols.length).setValues([cols]);
-      }
-    }
+    _checked[t] = true;
+    syncColumns(t, sh);
     sh.getRange(1, 1, 1, cols.length).setFontWeight('bold').setBackground('#263035').setFontColor('#ffffff');
     sh.setFrozenRows(1);
     sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@');

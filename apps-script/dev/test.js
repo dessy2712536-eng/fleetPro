@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const { loadBackend } = require('./emulator');
 
 const { ctx, book, call } = loadBackend();
+// Forget which tabs were checked, as a fresh Apps Script run would.
+const freshRun = () => require('vm').runInContext('Object.keys(_checked).forEach(k => delete _checked[k]);', ctx);
 ctx.setup();
 const ok = r => { assert.equal(r.ok, true, JSON.stringify(r)); return r.data; };
 
@@ -240,6 +242,22 @@ test('drivers keep their work arrangement', () => {
   const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'AR-1', make: 'Toyota', model: 'Vitz', type: 'car', fuel_type: 'petrol', status: 'active' } }));
   ok(as(admin, 'POST', '/contracts', { body: { driver_id: d.id, vehicle_id: car.id, type: 'work_and_pay', start_date: ctx.today(), status: 'active', deposit_amount: 15000, deposit_reference: 'ARR-DEP-1' } }));
   assert.equal(ok(as(admin, 'GET', `/drivers/${d.id}`)).arrangement, 'work_and_pay', 'the contract decides once there is one');
+});
+
+test('missing sheet columns are added automatically after a code update', () => {
+  const sh = book.getSheetByName('drivers');
+  const header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const at = header.indexOf('arrangement');
+  // Make the tab look like it did before the arrangement column existed.
+  const all = sh.getDataRange().getValues().map(r => r.filter((_, j) => j !== at).concat(['']));
+  sh.getRange(1, 1, all.length, all[0].length).setValues(all);
+  freshRun();
+  const d = ok(as(admin, 'GET', '/drivers', { query: { q: 'Arr Driver' } })).rows[0];
+  assert.equal(d.name, 'Arr Driver');
+  ok(as(admin, 'PUT', `/drivers/${d.id}`, { body: { phone: '0240000001' } }));
+  const again = ok(as(admin, 'GET', `/drivers/${d.id}`));
+  assert.equal(again.phone, '0240000001'); assert.equal(again.name, 'Arr Driver'); assert.equal(again.status, 'active');
+  assert.ok(sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].includes('arrangement'));
 });
 
 test('payDays counts Monday–Saturday', () => {
