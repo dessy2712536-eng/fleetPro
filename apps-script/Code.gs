@@ -859,7 +859,7 @@ Object.assign(RESOURCES, {
           throw invalid('vehicle_id', `This is a new car: it needs a deposit of ${money(newCar)}. Deposits below that get a retrieved car.`);
         }
       }
-      if (d.deposit_reference) {
+      if (d.deposit_reference && !isCash(d.deposit_reference)) {
         const ref = String(d.deposit_reference).toLowerCase();
         const clash = readAll('payments').some(p => String(p.momo_reference || '').toLowerCase() === ref)
           || readAll('contracts').some(c => c.id !== (prev ? prev.id : -1) && String(c.deposit_reference || '').toLowerCase() === ref);
@@ -908,7 +908,7 @@ Object.assign(RESOURCES, {
       if (d.type === 'waiver' && !(d.amount > 0)) throw invalid('amount', 'Enter the amount being excused');
       if (d.type === 'waiver' && !d.notes) throw invalid('notes', 'Give a reason, e.g. car in workshop, public holiday');
       if (d.paid_on && d.work_date && d.paid_on < d.work_date && d.type === 'daily') throw invalid('paid_on', 'Payment date is before the work date');
-      if (d.momo_reference) {
+      if (d.momo_reference && !isCash(d.momo_reference)) {
         const ref = String(d.momo_reference).toLowerCase();
         const clash = readAll('payments').some(p => p.id !== (prev ? prev.id : -1) && String(p.momo_reference || '').toLowerCase() === ref)
           || readAll('contracts').some(c => String(c.deposit_reference || '').toLowerCase() === ref);
@@ -971,6 +971,9 @@ function carCondition(v, m) {
   if (had > 1 || !m.activeByVehicle[v.id]) return 'retrieved';
   return 'new';
 }
+
+/** "CASH" (any case) marks money paid in cash. It has no transaction ID, so it may repeat. */
+function isCash(ref) { return /^\s*cash\s*$/i.test(String(ref || '')); }
 
 /** Ghana Card: GHA-, nine digits, a dash, then one check digit. */
 const GHANA_CARD_RE = /^GHA-\d{9}-\d$/;

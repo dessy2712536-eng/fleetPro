@@ -79,7 +79,7 @@ export const carFields = ({ withHeading = true } = {}) => [
   { name: 'c_paid_so_far', label: 'Total paid so far', type: 'number', showIf: f => hasCar(f) && f.c_onboarding === 'existing_driver', hint: 'All their daily payments up to yesterday, so they don\'t show as owing for days already paid' },
   { name: 'c_daily_rate', label: 'Daily payment', type: 'number', showIf: hasCar, hint: 'Leave empty for the standard rate (400 work & pay, Cerio 500, BYD 700)' },
   { name: 'c_deposit_amount', label: 'Security deposit', type: 'number', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay', hint: f => f.c_onboarding === 'existing_driver' ? 'The deposit they paid when they started (at least 5,000)' : depositHint(cachedOption('vehicle', f.car_id)) },
-  { name: 'c_deposit_reference', label: 'Deposit MoMo reference', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
+  { name: 'c_deposit_reference', label: 'Deposit MoMo reference', hint: 'MoMo transaction ID, or CASH if paid in cash', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
   { name: 'c_deposit_date', label: 'Deposit paid on', type: 'date', showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
 ];
 export const carDefaults = () => ({ c_type: 'work_and_pay', c_onboarding: 'new_driver', c_start_date: todayStr(), c_deposit_date: todayStr() });
@@ -201,7 +201,24 @@ export function Owing({ r, money }) {
   return <span className="txt-ok">Up to date</span>;
 }
 
+/** Save a contract; for an existing driver, also record what they paid before FleetPro. */
+export async function saveContract(form, editing) {
+  const { paid_so_far, __editing, ...body } = form;
+  if (editing && editing.id) { await api(`/contracts/${editing.id}`, { method: 'PUT', body }); return 'Contract updated'; }
+  const c = await api('/contracts', { method: 'POST', body });
+  if (Number(paid_so_far) > 0) {
+    const y = new Date(); y.setDate(y.getDate() - 1);
+    const yesterday = y.toISOString().slice(0, 10);
+    await api('/payments', { method: 'POST', body: {
+      contract_id: c.id, type: 'adjustment', paid_on: todayStr(), amount: Number(paid_so_far),
+      work_date: yesterday < c.start_date ? c.start_date : yesterday, notes: 'Total paid before FleetPro (opening balance)',
+    } }).catch(() => {});
+  }
+  return `${c.reg_number} assigned to ${c.driver_name}`;
+}
+
 export const contractsCfg = ({ money, user }) => ({
+  save: saveContract,
   endpoint: '/contracts', singular: 'Contract', exportName: 'contracts', dateRange: true,
   searchPlaceholder: 'Search driver, car, deposit reference',
   initialFilters: { status: 'active', ...mineFirst(user) },
@@ -220,19 +237,24 @@ export const contractsCfg = ({ money, user }) => ({
     { key: 'remaining_balance', label: 'Car balance', num: true, sort: 'remaining_balance', render: r => r.remaining_balance == null ? <span className="dim">Daily hire</span> : <>{money(r.remaining_balance)}<div className="progress" title={`${r.progress}% paid`}><span style={{ width: `${r.progress}%` }} /></div></> },
     { key: 'status', label: 'Status', sort: 'status', render: r => <Badge value={r.status} /> },
   ],
-  defaults: () => ({ type: 'work_and_pay', status: 'active', start_date: todayStr(), deposit_date: todayStr(), payment_days: 'mon_sat' }),
+  defaults: () => ({ type: 'work_and_pay', status: 'active', onboarding: 'new_driver', start_date: todayStr(), deposit_date: todayStr(), payment_days: 'mon_sat' }),
   fields: [
     { name: 'driver_id', label: 'Driver', type: 'driver', required: true },
     { name: 'vehicle_id', label: 'Car', type: 'vehicle', required: true, hint: f => depositHint(cachedOption('vehicle', f.vehicle_id)) },
     { name: 'type', label: 'Arrangement', type: 'select', options: ['work_and_pay', 'daily_hire'], required: true, hint: 'Work & pay: driver owns the car after the term. Daily hire: e.g. Cerio, BYD' },
     { name: 'status', label: 'Status', type: 'select', options: ['active', 'completed', 'stopped'], required: true },
+    { name: 'onboarding', label: 'New or existing driver?', type: 'select', options: ['new_driver', 'existing_driver'],
+      hint: f => f.onboarding === 'existing_driver' ? 'Already driving for you before FleetPro: their real start date and the deposit they paid are accepted' : 'Starting now' },
+    { name: 'paid_so_far', label: 'Total paid so far', type: 'number', showIf: f => f.onboarding === 'existing_driver' && !f.__editing,
+      hint: 'All their daily payments up to yesterday, so they don\'t show as owing for days already paid' },
     { name: 'start_date', label: 'Start date', type: 'date', required: true },
     { name: 'end_date', label: 'End date', type: 'date', hint: 'Work & pay: leave empty to set 4 years automatically' },
     { name: 'daily_rate', label: 'Daily payment', type: 'number', hint: 'Leave empty for the standard rate (400 work & pay, Cerio 500, BYD 700)' },
     { name: 'payment_days', label: 'Pays on', type: 'select', options: ['mon_sat', 'every_day'], required: true },
     { name: 'total_price', label: 'Car price (total to own)', type: 'number', showIf: f => f.type === 'work_and_pay', hint: 'Leave empty to use the price in Settings → Car prices (Livan X3 Pro: 500,000)' },
-    { name: 'deposit_amount', label: 'Security deposit', type: 'number', showIf: f => f.type === 'work_and_pay' || f.deposit_amount, hint: '5,000–10,000: retrieved car · 15,000: new car' },
-    { name: 'deposit_reference', label: 'Deposit MoMo reference', showIf: f => f.type === 'work_and_pay' || f.deposit_amount },
+    { name: 'deposit_amount', label: 'Security deposit', type: 'number', showIf: f => f.type === 'work_and_pay' || f.deposit_amount,
+      hint: f => f.onboarding === 'existing_driver' ? 'The deposit they paid when they started (at least 5,000)' : depositHint(cachedOption('vehicle', f.vehicle_id)) },
+    { name: 'deposit_reference', label: 'Deposit MoMo reference', hint: 'MoMo transaction ID, or CASH if paid in cash', showIf: f => f.type === 'work_and_pay' || f.deposit_amount },
     { name: 'deposit_date', label: 'Deposit paid on', type: 'date', showIf: f => f.type === 'work_and_pay' || f.deposit_amount },
     { name: 'ended_on', label: 'Ended on', type: 'date', showIf: f => f.status !== 'active' },
     { name: 'end_reason', label: 'Reason for ending', span: 2, showIf: f => f.status !== 'active' },
@@ -289,7 +311,7 @@ export const paymentsCfg = ({ money, user }) => ({
     { name: 'amount', label: 'Amount paid', type: 'number', required: true, hint: f => amountHint(f, money) },
     { name: 'work_date', label: 'For work done on', type: 'date', required: true, hint: 'Filled in with the next unpaid day. For excused days, the first day off' },
     { name: 'paid_on', label: 'Paid on', type: 'date', required: true },
-    { name: 'momo_reference', label: 'MTN MoMo reference', showIf: f => f.type !== 'waiver', hint: 'Transaction ID from the MoMo message' },
+    { name: 'momo_reference', label: 'MTN MoMo reference', showIf: f => f.type !== 'waiver', hint: 'Transaction ID from the MoMo message, or CASH if paid in cash' },
     { name: 'momo_number', label: 'Paid from number', showIf: f => f.type !== 'waiver' },
     { name: 'notes', label: 'Notes', type: 'textarea', hint: 'Required for excused days: give the reason' },
   ],

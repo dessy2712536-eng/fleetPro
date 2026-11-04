@@ -320,6 +320,17 @@ test('existing drivers keep the deposit they actually paid', () => {
   assert.equal(c.onboarding, 'existing_driver');
 });
 
+test('CASH can be used as the reference more than once', () => {
+  const mk = (n) => {
+    const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: `CS-${n}`, make: 'Toyota', model: 'Vitz', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+    const d = ok(as(admin, 'POST', '/drivers', { body: { name: `Cash ${n}`, status: 'active', manager_id: 1 } }));
+    return ok(as(admin, 'POST', '/contracts', { body: { driver_id: d.id, vehicle_id: car.id, type: 'work_and_pay', start_date: ctx.addDays(ctx.today(), -3), status: 'active', deposit_amount: 15000, deposit_reference: n === 1 ? 'CASH' : 'cash' } }));
+  };
+  const c1 = mk(1), c2 = mk(2);
+  ok(as(admin, 'POST', '/payments', { body: { contract_id: c1.id, type: 'daily', work_date: c1.start_date, paid_on: ctx.today(), amount: 400, momo_reference: 'CASH' } }));
+  ok(as(admin, 'POST', '/payments', { body: { contract_id: c2.id, type: 'daily', work_date: c2.start_date, paid_on: ctx.today(), amount: 400, momo_reference: 'Cash' } }));
+});
+
 test('payDays counts Monday–Saturday', () => {
   assert.equal(ctx.payDays('2026-11-02', '2026-11-08', 'mon_sat'), 6); // Mon..Sun
   assert.equal(ctx.payDays('2026-11-08', '2026-11-08', 'mon_sat'), 0); // Sunday

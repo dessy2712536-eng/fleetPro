@@ -230,7 +230,14 @@ export function RecordForm({ fields, initial, onSubmit, onCancel, submitLabel = 
     e.preventDefault();
     setBusy(true); setMsg(''); setErrors({});
     try { await onSubmit(form); }
-    catch (err) { setMsg(err.message); setErrors(err.details || {}); }
+    catch (err) {
+      const details = err.details || {};
+      // Errors for fields this form doesn't show (e.g. the car, when the car is fixed) go in the message itself.
+      const shown = new Set(fields.filter(f => !f.showIf || f.showIf(form)).map(f => f.name));
+      const hidden = Object.entries(details).filter(([k]) => !shown.has(k)).map(([, v]) => v);
+      setMsg(hidden.length ? hidden.join(' ') : err.message);
+      setErrors(details);
+    }
     finally { setBusy(false); }
   };
   const visible = fields.filter(f => !f.showIf || f.showIf(form));
@@ -382,7 +389,7 @@ export function ResourceTable({ cfg, fixed: fixedProp = NO_FIXED, embedded = fal
         <Modal title={editing.id ? `Edit ${cfg.singular.toLowerCase()}` : (cfg.addLabel || `Add ${cfg.singular.toLowerCase()}`)} onClose={() => setEditing(null)} wide={fields.length > 8}>
           <RecordForm
             fields={fields}
-            initial={editing.id ? pick(editing, cfg.fields) : { ...(cfg.defaults?.() || {}), ...fixed }}
+            initial={editing.id ? { ...pick(editing, cfg.fields), __editing: true } : { ...(cfg.defaults?.() || {}), ...fixed }}
             onSubmit={f => save({ ...f, ...fixed })}
             onCancel={() => setEditing(null)}
             submitLabel={editing.id ? 'Save changes' : (cfg.addLabel || `Add ${cfg.singular.toLowerCase()}`)}

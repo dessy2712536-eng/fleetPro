@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useApp } from '../context';
 import { Badge, ExpiryCell, Modal, Plate, RecordForm, ResourceTable, daysAgo, fmtDate, human, invalidateOptions, todayStr } from '../ui';
-import { Owing, carDefaults, carFields, giveCar, checkinsCfg, contractsCfg, driversCfg, expensesCfg, fuelCfg, paymentsCfg, recordsCfg, schedulesCfg, tripsCfg, vehiclesCfg } from '../resources';
+import { Owing, saveContract, carDefaults, carFields, giveCar, checkinsCfg, contractsCfg, driversCfg, expensesCfg, fuelCfg, paymentsCfg, recordsCfg, schedulesCfg, tripsCfg, vehiclesCfg } from '../resources';
 
 function useRecord(path) {
   const [row, setRow] = useState(null);
@@ -176,7 +176,7 @@ export function VehicleDetail() {
             <RecordForm fields={fields}
               initial={{ ...cc.defaults(), vehicle_id: v.id, driver_id: activeContract === null ? v.assigned_driver_id : null, type: /cerio|cireo|byd/i.test(v.make) ? 'daily_hire' : 'work_and_pay' }}
               onSubmit={async f => {
-                await api('/contracts', { method: 'POST', body: { ...f, vehicle_id: v.id } });
+                await saveContract({ ...f, vehicle_id: v.id }, null);
                 notify(`${v.reg_number} assigned`); setGiving(false); invalidateOptions(); refresh(); setTab('contracts');
               }}
               onCancel={() => setGiving(false)} submitLabel="Start contract" />
