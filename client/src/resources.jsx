@@ -14,7 +14,7 @@ export const vehiclesCfg = ({ dist, user }) => ({
   filters: [
     { name: 'manager_id', label: 'Manager', ref: 'manager' },
     { name: 'status', label: 'Status', options: ['active', 'in_maintenance', 'inactive', 'handed_over', 'disposed'] },
-    { name: 'type', label: 'Type', options: VEHICLE_TYPES },
+    { name: 'condition', label: 'New / retrieved', options: ['new', 'retrieved'] },
   ],
   columns: [
     { key: 'reg_number', label: 'Car', sort: 'reg_number', render: r => <Plate to={`/vehicles/${r.id}`}>{r.reg_number}</Plate> },
@@ -24,6 +24,7 @@ export const vehiclesCfg = ({ dist, user }) => ({
     { key: 'current_odometer', label: 'Odometer', num: true, sort: 'current_odometer', render: r => dist(r.current_odometer) },
     { key: 'insurance_expiry', label: 'Insurance', render: r => <ExpiryCell date={r.insurance_expiry} /> },
     { key: 'roadworthy_expiry', label: 'Roadworthy', render: r => <ExpiryCell date={r.roadworthy_expiry} /> },
+    { key: 'condition', label: 'Condition', render: r => r.condition ? <Badge value={r.condition} /> : <span className="dim">—</span> },
     { key: 'status', label: 'Status', sort: 'status', render: r => <Badge value={r.status} /> },
   ],
   defaults: () => ({ type: 'car', fuel_type: 'petrol', status: 'active', current_odometer: 0, ...(user && user.role === 'manager' ? { manager_id: user.id } : {}) }),
@@ -55,6 +56,14 @@ const hasCar = f => !!f.car_id;
 const isEV = make => /cerio|cireo|byd/i.test(make || '');
 
 /** Form fields for picking a car and the contract that goes with it. */
+/** New cars need the full new-car deposit; a car that has had a driver before is retrieved and needs less. */
+function depositHint(car) {
+  if (!car || !car.next_condition) return '5,000–10,000: retrieved car · 15,000: new car';
+  return car.next_condition === 'new'
+    ? 'New car (never had a driver): needs the full 15,000 deposit'
+    : 'Retrieved car (has had a driver before): deposit from 5,000';
+}
+
 export const carFields = ({ withHeading = true } = {}) => [
   ...(withHeading ? [{ name: 'car_heading', type: 'heading', label: 'Car', hint: 'Pick a car to give this driver now, or leave it empty and do it later.' }] : []),
   { name: 'car_id', label: 'Car', type: 'carpick', span: 2, allowDriverId: null,
@@ -67,7 +76,7 @@ export const carFields = ({ withHeading = true } = {}) => [
   { name: 'c_start_date', label: 'Start date', type: 'date', required: true, showIf: hasCar },
   { name: 'c_daily_rate', label: 'Daily payment', type: 'number', showIf: hasCar, hint: 'Leave empty for the standard rate (400 work & pay, Cerio 500, BYD 700)' },
   { name: 'c_paid_so_far', label: 'Total paid so far', type: 'number', showIf: hasCar, hint: 'Only for drivers who started before FleetPro: their payments up to yesterday' },
-  { name: 'c_deposit_amount', label: 'Security deposit', type: 'number', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay', hint: '5,000–10,000: retrieved car · 15,000: new car' },
+  { name: 'c_deposit_amount', label: 'Security deposit', type: 'number', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay', hint: f => depositHint(cachedOption('vehicle', f.car_id)) },
   { name: 'c_deposit_reference', label: 'Deposit MoMo reference', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
   { name: 'c_deposit_date', label: 'Deposit paid on', type: 'date', showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
 ];
@@ -211,7 +220,7 @@ export const contractsCfg = ({ money, user }) => ({
   defaults: () => ({ type: 'work_and_pay', status: 'active', start_date: todayStr(), deposit_date: todayStr(), payment_days: 'mon_sat' }),
   fields: [
     { name: 'driver_id', label: 'Driver', type: 'driver', required: true },
-    { name: 'vehicle_id', label: 'Car', type: 'vehicle', required: true, hint: 'New cars need the full new-car deposit; retrieved cars accept less' },
+    { name: 'vehicle_id', label: 'Car', type: 'vehicle', required: true, hint: f => depositHint(cachedOption('vehicle', f.vehicle_id)) },
     { name: 'type', label: 'Arrangement', type: 'select', options: ['work_and_pay', 'daily_hire'], required: true, hint: 'Work & pay: driver owns the car after the term. Daily hire: e.g. Cerio, BYD' },
     { name: 'status', label: 'Status', type: 'select', options: ['active', 'completed', 'stopped'], required: true },
     { name: 'start_date', label: 'Start date', type: 'date', required: true },

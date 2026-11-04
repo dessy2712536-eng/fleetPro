@@ -87,6 +87,7 @@ export function useOptions(kind) {
         value: x.id, label: label(x),
         vehicle_id: x.vehicle_id, status: x.status, daily_rate: x.daily_rate, type: x.type, contract_id: x.contract_id, next_unpaid_day: x.next_unpaid_day, manager_id: x.manager_id,
         reg_number: x.reg_number, make: x.make, model: x.model, assigned_driver_id: x.assigned_driver_id, driver_name: x.driver_name, manager_name: x.manager_name,
+        condition: x.condition, next_condition: x.next_condition,
       })).sort((a, b) => (kind === 'contract' ? (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1) : 0) || a.label.localeCompare(b.label));
       setOpts(cache[kind]);
     }).catch(() => {});
@@ -135,7 +136,8 @@ function CarPick({ value, onChange, allowDriverId, ...rest }) {
   const all = useOptions('vehicle').filter(o => o.status !== 'disposed' && o.status !== 'handed_over');
   const free = all.filter(o => !o.assigned_driver_id || (allowDriverId && o.assigned_driver_id === allowDriverId));
   const taken = all.filter(o => o.assigned_driver_id && !(allowDriverId && o.assigned_driver_id === allowDriverId));
-  const label = o => `${o.reg_number} · ${o.make} ${o.model}${o.status === 'in_maintenance' ? ' (in workshop)' : ''}${user.role === 'admin' && o.manager_name ? ` · ${o.manager_name}` : ''}`;
+  const cond = o => (o.assigned_driver_id ? '' : o.next_condition === 'retrieved' ? ' · Retrieved' : o.next_condition === 'new' ? ' · New' : '');
+  const label = o => `${o.reg_number} · ${o.make} ${o.model}${cond(o)}${o.status === 'in_maintenance' ? ' (in workshop)' : ''}${user.role === 'admin' && o.manager_name ? ` · ${o.manager_name}` : ''}`;
   return (
     <select value={value ?? ''} onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} {...rest}>
       <option value="">{all.length ? 'No car for now' : 'No cars yet – add cars first'}</option>

@@ -492,6 +492,9 @@ function maps() {
   readAll('contracts').forEach(c => {
     if (c.status === 'active') { m.activeByDriver[c.driver_id] = c; m.activeByVehicle[c.vehicle_id] = c; }
   });
+  // Which drivers each car has had (for New / Retrieved).
+  m.carDrivers = {};
+  readAll('contracts').forEach(c => { (m.carDrivers[c.vehicle_id] = m.carDrivers[c.vehicle_id] || {})[c.driver_id] = 1; });
   // Cars marked with a driver directly on the car (no contract yet).
   m.carByDriver = {};
   readAll('vehicles').forEach(v => { if (v.assigned_driver_id && v.status !== 'disposed') m.carByDriver[v.assigned_driver_id] = v; });
@@ -564,8 +567,13 @@ function contractStats(c, payments) {
 }
 
 /** Was this car driven by someone else before this contract? (retrieved car vs new car) */
-function isRetrievedCar(vehicleId, contractId) {
-  return readAll('contracts').some(c => c.vehicle_id === vehicleId && c.id !== contractId && (!contractId || c.id < contractId));
+/**
+ * Every car starts as NEW. Once it has been given to a driver, it becomes RETRIEVED for any
+ * different driver who gets it after that. The same driver getting their own car back doesn't count.
+ */
+function isRetrievedCar(vehicleId, contractId, driverId) {
+  return readAll('contracts').some(c => c.vehicle_id === vehicleId && c.id !== contractId
+    && (!contractId || c.id < contractId) && (driverId == null || c.driver_id !== driverId));
 }
 
 function defaultRate(type, vehicle) {
@@ -587,6 +595,10 @@ const VIEWS = {
   vehicles: (r, m) => Object.assign({}, r, {
     driver_name: m.d[r.assigned_driver_id] ? m.d[r.assigned_driver_id].name : null,
     has_contract: !!m.activeByVehicle[r.id],
+    // condition: what the car is now. next_condition: what it will be for the next (different) driver.
+    condition: carCondition(r, m),
+    next_condition: m.carDrivers[r.id] ? 'retrieved' : 'new',
+    drivers_had: m.carDrivers[r.id] ? Object.keys(m.carDrivers[r.id]).length : 0,
     manager_name: m.u[r.manager_id] ? m.u[r.manager_id].name : null,
   }),
   drivers: (r, m) => {
@@ -611,7 +623,7 @@ const VIEWS = {
     return Object.assign({}, r, contractStats(r, m.pay[r.id]), {
       driver_name: d.name, manager_id: d.manager_id || null, manager_name: m.u[d.manager_id] ? m.u[d.manager_id].name : null,
       reg_number: v.reg_number, make: v.make, model: v.model,
-      car_condition: r.type === 'work_and_pay' ? (Object.keys(m.c).some(k => m.c[k].vehicle_id === r.vehicle_id && m.c[k].id < r.id) ? 'retrieved' : 'new') : null,
+      car_condition: Object.keys(m.c).some(k => m.c[k].vehicle_id === r.vehicle_id && m.c[k].id < r.id && m.c[k].driver_id !== r.driver_id) ? 'retrieved' : 'new',
     });
   },
   payments: (r, m) => {
@@ -677,7 +689,7 @@ const RESOURCES = {
         .forEach(c => updateWhere('drivers', d => d.id === c.driver_id && d.manager_id !== row.manager_id, { manager_id: row.manager_id }));
     },
     search: ['reg_number', 'make', 'model', 'vin', 'driver_name', 'manager_name'],
-    filters: { status: 'status', type: 'type', fuel_type: 'fuel_type', driver_id: 'assigned_driver_id', manager_id: 'manager_id' },
+    filters: { status: 'status', type: 'type', fuel_type: 'fuel_type', driver_id: 'assigned_driver_id', manager_id: 'manager_id', condition: 'condition' },
     sortable: ['reg_number', 'make', 'year', 'current_odometer', 'status', 'manager_name'],
     check: d => { requireManagerUser(d.manager_id); },
     defaultSort: ['reg_number', 'asc'],
@@ -841,7 +853,7 @@ Object.assign(RESOURCES, {
         if (d.deposit_amount == null) throw invalid('deposit_amount', `Work & pay needs a security deposit (from ${money(min)})`);
         if (d.deposit_amount < min) throw invalid('deposit_amount', `The minimum deposit is ${money(min)}`);
         if (!d.deposit_reference) throw invalid('deposit_reference', 'Enter the MoMo reference for the deposit');
-        if (!isRetrievedCar(d.vehicle_id, prev ? prev.id : null) && d.deposit_amount < newCar) {
+        if (!isRetrievedCar(d.vehicle_id, prev ? prev.id : null, d.driver_id) && d.deposit_amount < newCar) {
           throw invalid('vehicle_id', `This is a new car: it needs a deposit of ${money(newCar)}. Deposits below that get a retrieved car.`);
         }
       }
@@ -949,6 +961,14 @@ Object.assign(RESOURCES, {
     describe: r => `${r.driver_name}: ${r.intention.replace(/_/g, ' ')}${r.complaint ? ' – complaint' : ''}`,
   },
 });
+
+/** New until the car has been given to a second driver, or its first driver has stopped. */
+function carCondition(v, m) {
+  const had = m.carDrivers[v.id] ? Object.keys(m.carDrivers[v.id]).length : 0;
+  if (!had) return 'new';
+  if (had > 1 || !m.activeByVehicle[v.id]) return 'retrieved';
+  return 'new';
+}
 
 /** Ghana Card: GHA-, nine digits, a dash, then one check digit. */
 const GHANA_CARD_RE = /^GHA-\d{9}-\d$/;

@@ -285,6 +285,31 @@ test('Livan X3 Pro costs 500,000 to own', () => {
   assert.equal(ok(as(admin, 'GET', `/drivers/${d1.id}`)).arrangement, 'work_and_pay');
 });
 
+test('cars start new; become retrieved for the next different driver', () => {
+  const st = ok(as(admin, 'GET', '/settings'));
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'NR-1', make: 'Livan', model: 'X3 Pro', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  assert.equal(car.condition, 'new'); assert.equal(car.next_condition, 'new');
+  const a = ok(as(admin, 'POST', '/drivers', { body: { name: 'First Owner', status: 'active', manager_id: 1 } }));
+  const b = ok(as(admin, 'POST', '/drivers', { body: { name: 'Second Owner', status: 'active', manager_id: 1 } }));
+  const base = { vehicle_id: car.id, type: 'work_and_pay', start_date: ctx.today(), status: 'active' };
+  // brand-new car: 8,000 is not enough
+  assert.match(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: a.id, deposit_amount: 8000, deposit_reference: 'NR-D1' } }).details.vehicle_id, /new car/);
+  const c1 = ok(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: a.id, deposit_amount: Number(st.deposit_new_car), deposit_reference: 'NR-D1' } }));
+  assert.equal(c1.car_condition, 'new');
+  let v = ok(as(admin, 'GET', `/vehicles/${car.id}`));
+  assert.equal(v.condition, 'new', 'still new with its first driver'); assert.equal(v.next_condition, 'retrieved');
+  ok(as(admin, 'PUT', `/contracts/${c1.id}`, { body: { status: 'stopped', end_reason: 'Left' } }));
+  v = ok(as(admin, 'GET', `/vehicles/${car.id}`));
+  assert.equal(v.condition, 'retrieved');
+  // the same driver taking their own car back is not a retrieved car
+  ok(as(admin, 'PUT', `/drivers/${a.id}`, { body: { status: 'active' } }));
+  assert.match(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: a.id, deposit_amount: 8000, deposit_reference: 'NR-D2' } }).details.vehicle_id, /new car/);
+  // a different driver gets it as retrieved
+  const c2 = ok(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: b.id, deposit_amount: 8000, deposit_reference: 'NR-D3' } }));
+  assert.equal(c2.car_condition, 'retrieved');
+  assert.equal(ok(as(admin, 'GET', '/vehicles', { query: { condition: 'retrieved', limit: 500 } })).rows.some(x => x.id === car.id), true);
+});
+
 test('payDays counts Monday–Saturday', () => {
   assert.equal(ctx.payDays('2026-11-02', '2026-11-08', 'mon_sat'), 6); // Mon..Sun
   assert.equal(ctx.payDays('2026-11-08', '2026-11-08', 'mon_sat'), 0); // Sunday

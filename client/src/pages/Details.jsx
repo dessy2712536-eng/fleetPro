@@ -120,6 +120,7 @@ export function VehicleDetail() {
             <p className="sub">{[v.year, human(v.type), human(v.fuel_type), v.color].filter(Boolean).join(' · ')}</p>
           </div>
           <Badge value={v.status} />
+          {v.condition && <span title={v.condition === 'new' ? 'Never given to a second driver' : 'Has had a driver before: the next driver gets it as a retrieved car'}><Badge value={v.condition} /></span>}
           <span className="spacer" />
           {can('manager') && (!v.assigned_driver_id || activeContract === null) && ['active', 'inactive', 'in_maintenance'].includes(v.status) && (
             <button className="btn primary" onClick={() => setGiving(true)} disabled={!v.manager_id} title={v.manager_id ? '' : 'Assign a manager first'}>Assign driver</button>
