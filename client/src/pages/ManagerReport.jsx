@@ -150,7 +150,7 @@ export default function ManagerReport() {
                       {period === 'day' && r.momo_references && <div className="mono dim">{r.momo_references}</div>}
                     </td>
                     <td className="num">{r.shortfall > 0 ? <span className="txt-bad">{money(r.shortfall)}</span> : r.shortfall < 0 ? <span className="txt-ok">+{money(-r.shortfall)}</span> : <span className="txt-ok">✓</span>}</td>
-                    <td className="num">{r.arrears_total > 0 ? <span className={r.days_behind >= 3 ? 'txt-bad' : 'txt-warn'}>{money(r.arrears_total)}<div className="dim">{r.days_behind} days</div></span> : <span className="txt-ok">{r.arrears_total < 0 ? `${money(-r.arrears_total)} ahead` : 'Up to date'}</span>}</td>
+                    <td className="num">{r.arrears_total > 0 ? <span className={r.days_behind >= 3 ? 'txt-bad' : 'txt-warn'}>{money(r.arrears_total)}<div className="dim">{r.days_behind} day{r.days_behind == 1 ? '' : 's'}</div></span> : <span className="txt-ok">{r.arrears_total < 0 ? `${money(-r.arrears_total)} ahead` : 'Up to date'}</span>}</td>
                     <td className="num">{r.remaining_balance == null ? <span className="dim">Daily hire</span> : <>{money(r.remaining_balance)}<div className="dim">{r.progress}% paid</div></>}</td>
                     <td className="wrap">
                       {r.car_condition ? <Badge value={r.car_condition} /> : <Badge value={r.vehicle_status} />}

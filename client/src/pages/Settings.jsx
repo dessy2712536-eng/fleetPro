@@ -9,10 +9,58 @@ export default function Settings() {
     <>
       <PageHead title="Settings" />
       <CompanySettings />
+      <CarPrices />
       <ChangePassword />
       {can('admin') && <Users />}
       {can('manager') && <Activity />}
     </>
+  );
+}
+
+/** Price a work & pay driver pays to own each car model, e.g. Livan X3 Pro = 500,000. */
+function CarPrices() {
+  const { settings, setSettings, can, notify, money } = useApp();
+  const parse = () => { try { return Object.entries(JSON.parse(settings.model_prices || '{}')).map(([model, price]) => ({ model, price: String(price) })); } catch { return []; } };
+  const [rows, setRows] = useState(parse);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setRows(parse()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settings.model_prices]);
+  const admin = can('admin');
+  const save = async () => {
+    setError('');
+    const clean = rows.filter(r => r.model.trim() || r.price);
+    if (clean.some(r => !r.model.trim() || !(Number(String(r.price).replace(/,/g, '')) > 0))) { setError('Give every row a car model and a price above 0.'); return; }
+    const obj = Object.fromEntries(clean.map(r => [r.model.trim(), Number(String(r.price).replace(/,/g, ''))]));
+    setBusy(true);
+    try { setSettings(await api('/settings', { method: 'PUT', body: { model_prices: JSON.stringify(obj) } })); notify('Car prices saved'); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <section className="panel settings-block">
+      <h2>Car prices (work & pay)</h2>
+      <p className="dim">What a work & pay driver pays in total to own each car model. It applies to every driver on that model, including drivers who already have the car. The model must match how the car is named in FleetPro, e.g. <em>Livan X3 Pro</em> (spaces and capitals don't matter). Models without a price use the daily payment × every working day in the term.</p>
+      {!admin ? (
+        <dl className="facts-inline">{rows.length ? rows.map(r => <div key={r.model}><dt>{r.model}</dt><dd>{money(r.price)}</dd></div>) : <div><dd className="dim">No prices set</dd></div>}</dl>
+      ) : (
+        <div className="form">
+          {error && <div className="form-error" role="alert">{error}</div>}
+          <div className="price-rows">
+            {rows.map((r, i) => (
+              <div className="price-row" key={i}>
+                <input aria-label="Car model" placeholder="Car model, e.g. Livan X3 Pro" value={r.model} onChange={e => setRows(rs => rs.map((x, j) => j === i ? { ...x, model: e.target.value } : x))} />
+                <input aria-label="Price" inputMode="numeric" placeholder="Price, e.g. 500000" value={r.price} onChange={e => setRows(rs => rs.map((x, j) => j === i ? { ...x, price: e.target.value } : x))} />
+                <button type="button" className="link-btn danger" onClick={() => setRows(rs => rs.filter((_, j) => j !== i))}>Remove</button>
+              </div>
+            ))}
+          </div>
+          <footer className="form-actions">
+            <button type="button" className="btn ghost" onClick={() => setRows(rs => [...rs, { model: '', price: '' }])}>Add a car model</button>
+            <button type="button" className="btn primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save car prices'}</button>
+          </footer>
+        </div>
+      )}
+    </section>
   );
 }
 

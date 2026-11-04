@@ -340,3 +340,11 @@ tr.row-short td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 
 .form-heading { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 4px; }
 .form-heading h3 { font-family: var(--font-cond); font-size: 18px; margin: 0 0 2px; }
+
+.paid-panel { margin-bottom: 18px; }
+.paid-total { font-family: var(--font-cond); font-size: 24px; font-weight: 600; }
+.paid-total .dim { font-family: var(--font); font-size: 13px; font-weight: 400; }
+.facts-costs small { display: block; }
+.price-rows { display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
+.price-row { display: grid; grid-template-columns: 2fr 1fr auto; gap: 8px; align-items: center; }
+@media (max-width: 520px) { .price-row { grid-template-columns: 1fr; } }

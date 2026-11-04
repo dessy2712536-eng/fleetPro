@@ -106,7 +106,7 @@ export default function Dashboard() {
                 {c.top_arrears.map(a => (
                   <tr key={a.driver_id}>
                     <td><Link to={`/drivers/${a.driver_id}`} className="strong-link">{a.driver_name}</Link><div className="dim">{a.reg_number} · last paid {a.last_payment_on ? fmtDate(a.last_payment_on) : 'never'}</div></td>
-                    <td className="num"><strong className={a.days_behind >= 3 ? 'txt-bad' : 'txt-warn'}>{money(a.arrears)}</strong><div className="dim">{a.days_behind} days</div></td>
+                    <td className="num"><strong className={a.days_behind >= 3 ? 'txt-bad' : 'txt-warn'}>{money(a.arrears)}</strong><div className="dim">{a.days_behind} day{a.days_behind == 1 ? '' : 's'}</div></td>
                   </tr>
                 ))}
               </tbody>

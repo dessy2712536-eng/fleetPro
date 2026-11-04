@@ -13,6 +13,56 @@ function useRecord(path) {
   return { row, error, load };
 }
 
+
+/**
+ * Money paid under each contract: on a car page, one row per driver who has had the car;
+ * on a driver page, one row per car the driver has had.
+ */
+function PaidByContract({ query, mode, reloadKey }) {
+  const { money } = useApp();
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    api('/contracts', { query: { ...query, limit: 500, sort: 'start_date', dir: 'desc' } }).then(r => setRows(r.rows)).catch(() => setRows([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(query), reloadKey]);
+  if (!rows) return null;
+  const total = rows.reduce((n, c) => n + (Number(c.paid_total) || 0), 0);
+  const last = rows.map(c => c.last_payment_on).filter(Boolean).sort().slice(-1)[0];
+  if (mode === 'driver' && rows.length < 2) return null; // the driver's single car is already shown above
+  return (
+    <section className="panel paid-panel">
+      <header className="panel-head">
+        <h2>{mode === 'car' ? 'Payments made on this car' : 'Paid on each car'}</h2>
+        {rows.length > 0 && <span className="paid-total">{money(total)} <span className="dim">in total{last ? ` · last paid ${fmtDate(last)}` : ''}</span></span>}
+      </header>
+      {rows.length === 0 ? <p className="empty">{mode === 'car' ? 'No driver has had this car yet, so nothing has been paid on it.' : 'No payments yet.'}</p> : (
+        <div className="table-wrap flat">
+          <table className="data">
+            <thead><tr>
+              <th>{mode === 'car' ? 'Driver' : 'Car'}</th><th>Arrangement</th><th>Period</th>
+              <th className="num">Paid</th><th className="num">Car price</th><th className="num">Left to pay</th><th className="num">Owing now</th><th>Status</th>
+            </tr></thead>
+            <tbody>
+              {rows.map(c => (
+                <tr key={c.id}>
+                  <td>{mode === 'car' ? <Link to={`/drivers/${c.driver_id}`} className="strong-link">{c.driver_name}</Link> : <Plate to={`/vehicles/${c.vehicle_id}`}>{c.reg_number}</Plate>}</td>
+                  <td>{human(c.type)}<div className="dim">{money(c.daily_rate)}/day</div></td>
+                  <td>{fmtDate(c.start_date)}<div className="dim">{c.ended_on ? `to ${fmtDate(c.ended_on)}` : 'to now'}</div></td>
+                  <td className="num"><strong>{money(c.paid_total)}</strong>{c.last_payment_on && <div className="dim">last {fmtDate(c.last_payment_on)}</div>}</td>
+                  <td className="num">{c.contract_value != null ? money(c.contract_value) : <span className="dim">—</span>}</td>
+                  <td className="num">{c.remaining_balance != null && c.status === 'active' ? <>{money(c.remaining_balance)}<div className="dim">{c.progress}% paid</div></> : c.status === 'completed' ? <span className="txt-ok">Paid off</span> : <span className="dim">—</span>}</td>
+                  <td className="num">{c.status === 'active' ? <Owing r={c} money={money} /> : c.arrears > 0 ? <span className="txt-bad">{money(c.arrears)}</span> : <span className="dim">—</span>}</td>
+                  <td><Badge value={c.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function VehicleDetail() {
   const { id } = useParams();
   const app = useApp();
@@ -110,6 +160,7 @@ export function VehicleDetail() {
         </dl>
       </div>
       {v.notes && <p className="notes">{v.notes}</p>}
+      <PaidByContract query={{ vehicle_id: Number(id) }} mode="car" reloadKey={summary} />
 
       <div className="tabs" role="tablist">
         {Object.entries(tabs).map(([k, [label]]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{label}</button>)}
@@ -217,9 +268,10 @@ export function DriverDetail() {
             <div><dt>Licence expires</dt><dd><ExpiryCell date={d.license_expiry} /></dd></div>
           </dl>
           <dl className="facts-costs">
+            <div><dt>Total paid on {contract.reg_number}</dt><dd>{money(contract.paid_total)}<small>{contract.last_payment_on ? `Last paid ${fmtDate(contract.last_payment_on)}` : 'No payments yet'}</small></dd></div>
+            {contract.contract_value != null && <div><dt>Car price</dt><dd>{money(contract.contract_value)}</dd></div>}
+            {contract.remaining_balance != null && <div><dt>Left to pay for the car</dt><dd>{money(contract.remaining_balance)}<div className="progress dark"><span style={{ width: `${contract.progress}%` }} /></div><small>{contract.progress}% paid</small></dd></div>}
             <div><dt>Owing now</dt><dd><Owing r={contract} money={money} /></dd></div>
-            <div><dt>Paid so far</dt><dd>{money(contract.paid_total)}</dd></div>
-            {contract.remaining_balance != null && <div><dt>Left to own the car</dt><dd>{money(contract.remaining_balance)}<div className="progress dark"><span style={{ width: `${contract.progress}%` }} /></div><small>{contract.progress}% of {money(contract.contract_value)}</small></dd></div>}
           </dl>
         </div>
       ) : (
@@ -233,6 +285,7 @@ export function DriverDetail() {
         )
       )}
       {d.notes && <p className="notes">{d.notes}</p>}
+      <PaidByContract query={{ driver_id: Number(id) }} mode="driver" reloadKey={version} />
 
       <div className="tabs" role="tablist">
         {[['payments', 'Payments'], ['checkins', 'Check-ins'], ['contracts', 'Contracts'], ['trips', 'Trips']].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}</button>)}

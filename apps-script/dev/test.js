@@ -260,6 +260,31 @@ test('missing sheet columns are added automatically after a code update', () => 
   assert.ok(sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].includes('arrangement'));
 });
 
+test('Livan X3 Pro costs 500,000 to own', () => {
+  const st = ok(as(admin, 'GET', '/settings'));
+  assert.deepEqual(JSON.parse(st.model_prices), { 'Livan X3 Pro': 500000 });
+  const d1 = ok(as(admin, 'POST', '/drivers', { body: { name: 'Livan One', status: 'active', manager_id: 1, arrangement: 'work_and_pay' } }));
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'LV-1', make: 'LIVAN', model: 'X3Pro', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  const c = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d1.id, vehicle_id: car.id, type: 'work_and_pay', start_date: ctx.addDays(ctx.today(), -2), status: 'active', deposit_amount: 15000, deposit_reference: 'LV-DEP-1' } }));
+  assert.equal(c.contract_value, 500000);
+  assert.equal(c.price_source, 'model');
+  ok(as(admin, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: c.start_date, paid_on: ctx.today(), amount: 400, momo_reference: 'LV-P-1' } }));
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).remaining_balance, 499600);
+  // a different price on one contract wins
+  ok(as(admin, 'PUT', `/contracts/${c.id}`, { body: { total_price: 450000 } }));
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).contract_value, 450000);
+  ok(as(admin, 'PUT', `/contracts/${c.id}`, { body: { total_price: null } }));
+  // changing the model price applies to every Livan X3 Pro driver
+  ok(as(admin, 'PUT', '/settings', { body: { model_prices: JSON.stringify({ 'Livan X3 Pro': 520000 }) } }));
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).contract_value, 520000);
+  assert.equal(as(admin, 'PUT', '/settings', { body: { model_prices: '{"Livan X3 Pro": 0}' } }).status, 422);
+  ok(as(admin, 'PUT', '/settings', { body: { model_prices: JSON.stringify({ 'Livan X3 Pro': 500000 }) } }));
+  // the car's contracts carry what each driver has paid on it
+  const onCar = ok(as(admin, 'GET', '/contracts', { query: { vehicle_id: car.id } })).rows;
+  assert.equal(onCar[0].paid_total, 400); assert.equal(onCar[0].remaining_balance, 499600);
+  assert.equal(ok(as(admin, 'GET', `/drivers/${d1.id}`)).arrangement, 'work_and_pay');
+});
+
 test('payDays counts Monday–Saturday', () => {
   assert.equal(ctx.payDays('2026-11-02', '2026-11-08', 'mon_sat'), 6); // Mon..Sun
   assert.equal(ctx.payDays('2026-11-08', '2026-11-08', 'mon_sat'), 0); // Sunday

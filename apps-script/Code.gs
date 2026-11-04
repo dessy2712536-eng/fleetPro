@@ -128,6 +128,7 @@ const FIELDS = {
     end_date: { type: 'date' },
     daily_rate: { type: 'number', min: 1 },
     payment_days: { type: 'enum', values: ['mon_sat', 'every_day'], default: 'mon_sat' },
+    total_price: { type: 'number', min: 1 },
     deposit_amount: { type: 'number', min: 0 },
     deposit_reference: { type: 'string', max: 60 },
     deposit_date: { type: 'date' },
@@ -331,14 +332,31 @@ const DEFAULT_SETTINGS = {
   company_name: 'My Fleet', currency: 'GHS', distance_unit: 'km', alert_days: '30',
   rate_work_and_pay: '400', rate_cerio: '500', rate_byd: '700', rate_other_daily: '500',
   contract_years: '4', deposit_min: '5000', deposit_new_car: '15000', arrears_alert_days: '3',
+  // Work & pay price drivers pay to own each car model, e.g. {"Livan X3 Pro": 500000}
+  model_prices: '{"Livan X3 Pro":500000}',
 };
 
+/** "Livan X3Pro", "LIVAN x3 pro" → "livanx3pro" so spellings match. */
+function modelKey(make, model) { return String((make || '') + (model || '')).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+/** Price to own this car on work & pay, from Settings → Car prices; null if none is set. */
+function modelPrice(vehicle) {
+  if (!vehicle) return null;
+  let prices = {};
+  try { prices = JSON.parse(getSettings().model_prices || '{}'); } catch (e) { prices = {}; }
+  const want = modelKey(vehicle.make, vehicle.model);
+  for (const name in prices) if (modelKey('', name) === want && Number(prices[name]) > 0) return Number(prices[name]);
+  return null;
+}
+
 function getSettings() {
+  if (_cache.__settings) return Object.assign({}, _cache.__settings);
   const out = Object.assign({}, DEFAULT_SETTINGS);
   const sh = ss().getSheetByName('settings');
   if (!sh) return out;
   sh.getDataRange().getValues().slice(1).forEach(r => { if (r[0]) out[r[0]] = String(r[1]); });
-  return out;
+  _cache.__settings = out;
+  return Object.assign({}, out);
 }
 
 function saveSettings(obj) {
@@ -347,7 +365,8 @@ function saveSettings(obj) {
   const rows = Object.keys(merged).map(k => [k, String(merged[k])]);
   sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 1), 2).clearContent();
   sh.getRange(2, 1, rows.length, 2).setNumberFormat('@').setValues(rows);
-  return merged;
+  _cache.__settings = merged;
+  return Object.assign({}, merged);
 }
 
 // ============================================================================
@@ -518,7 +537,10 @@ function contractStats(c, payments) {
   const dueDays = payDays(c.start_date, minDate(dueThrough(), contractLastDay(c)), c.payment_days);
   const expected = round(dueDays * rate);
   const arrears = round(expected - paid - waived);
-  const total = c.type === 'work_and_pay' && c.end_date ? round(payDays(c.start_date, c.end_date, c.payment_days) * rate) : null;
+  // Price to own the car: set on the contract, else the model's price (Settings → Car prices), else daily rate × every pay day in the term.
+  const total = c.type !== 'work_and_pay' ? null
+    : Number(c.total_price) > 0 ? round(Number(c.total_price))
+    : modelPrice(findById('vehicles', c.vehicle_id)) || (c.end_date ? round(payDays(c.start_date, c.end_date, c.payment_days) * rate) : null);
   const lastPay = payments.filter(p => MONEY_TYPES[p.type]).map(p => p.paid_on).sort().slice(-1)[0] || null;
   // Next work day not yet paid for: the day after the latest day covered by a payment or excused days.
   const covered = payments.map(p => {
@@ -533,6 +555,7 @@ function contractStats(c, payments) {
     paid_total: paid, waived_total: waived, days_due: dueDays, expected_to_date: expected,
     arrears: arrears, days_behind: rate && arrears > 0 ? round(arrears / rate, 1) : 0,
     contract_value: total,
+    price_source: c.type !== 'work_and_pay' ? null : Number(c.total_price) > 0 ? 'contract' : modelPrice(findById('vehicles', c.vehicle_id)) ? 'model' : 'daily_rate',
     remaining_balance: total != null ? round(Math.max(total - paid, 0)) : null,
     progress: total ? round(Math.min(paid / total, 1) * 100, 1) : null,
     last_payment_on: lastPay,
@@ -1493,6 +1516,7 @@ const SETTING_FIELDS = {
   rate_work_and_pay: { type: 'number', min: 1 }, rate_cerio: { type: 'number', min: 1 }, rate_byd: { type: 'number', min: 1 },
   rate_other_daily: { type: 'number', min: 1 }, contract_years: { type: 'int', min: 1, max: 15 },
   deposit_min: { type: 'number', min: 0 }, deposit_new_car: { type: 'number', min: 0 }, arrears_alert_days: { type: 'int', min: 1, max: 60 },
+  model_prices: { type: 'string', max: 5000 },
 };
 
 function route(method, path, q, body, token) {
@@ -1553,6 +1577,13 @@ function route(method, path, q, body, token) {
     if (method === 'GET') return getSettings();
     requireRole(user, 'admin');
     const data = validate(body || {}, SETTING_FIELDS, true);
+    if (data.model_prices != null) {
+      let parsed;
+      try { parsed = JSON.parse(data.model_prices); } catch (e) { parsed = null; }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.keys(parsed).some(k => !(Number(parsed[k]) > 0))) {
+        throw invalid('model_prices', 'Each car model needs a price above 0');
+      }
+    }
     const clean = {};
     Object.keys(data).forEach(k => { if (data[k] !== null) clean[k] = data[k]; });
     const s = saveSettings(clean);

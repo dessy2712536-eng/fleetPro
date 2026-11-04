@@ -184,7 +184,7 @@ export const driversCfg = ({ money, user } = {}) => ({
 
 export function Owing({ r, money }) {
   const a = r.arrears;
-  if (a > 0) return <span className={r.days_behind >= 3 ? 'txt-bad' : 'txt-warn'}>{money(a)}<div className="dim">{r.days_behind} days behind</div></span>;
+  if (a > 0) return <span className={r.days_behind >= 3 ? 'txt-bad' : 'txt-warn'}>{money(a)}<div className="dim">{r.days_behind} day{r.days_behind == 1 ? '' : 's'} behind</div></span>;
   if (a < 0) return <span className="txt-ok">{money(-a)} ahead</span>;
   return <span className="txt-ok">Up to date</span>;
 }
@@ -218,6 +218,7 @@ export const contractsCfg = ({ money, user }) => ({
     { name: 'end_date', label: 'End date', type: 'date', hint: 'Work & pay: leave empty to set 4 years automatically' },
     { name: 'daily_rate', label: 'Daily payment', type: 'number', hint: 'Leave empty for the standard rate (400 work & pay, Cerio 500, BYD 700)' },
     { name: 'payment_days', label: 'Pays on', type: 'select', options: ['mon_sat', 'every_day'], required: true },
+    { name: 'total_price', label: 'Car price (total to own)', type: 'number', showIf: f => f.type === 'work_and_pay', hint: 'Leave empty to use the price in Settings → Car prices (Livan X3 Pro: 500,000)' },
     { name: 'deposit_amount', label: 'Security deposit', type: 'number', showIf: f => f.type === 'work_and_pay' || f.deposit_amount, hint: '5,000–10,000: retrieved car · 15,000: new car' },
     { name: 'deposit_reference', label: 'Deposit MoMo reference', showIf: f => f.type === 'work_and_pay' || f.deposit_amount },
     { name: 'deposit_date', label: 'Deposit paid on', type: 'date', showIf: f => f.type === 'work_and_pay' || f.deposit_amount },
