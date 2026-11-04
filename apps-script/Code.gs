@@ -453,6 +453,9 @@ function maps() {
   readAll('contracts').forEach(c => {
     if (c.status === 'active') { m.activeByDriver[c.driver_id] = c; m.activeByVehicle[c.vehicle_id] = c; }
   });
+  // Cars marked with a driver directly on the car (no contract yet).
+  m.carByDriver = {};
+  readAll('vehicles').forEach(v => { if (v.assigned_driver_id && v.status !== 'disposed') m.carByDriver[v.assigned_driver_id] = v; });
   m.lastCheckin = {};
   readAll('checkins').forEach(ci => {
     const prev = m.lastCheckin[ci.driver_id];
@@ -540,6 +543,7 @@ function addYears(dateStr, years) {
 const VIEWS = {
   vehicles: (r, m) => Object.assign({}, r, {
     driver_name: m.d[r.assigned_driver_id] ? m.d[r.assigned_driver_id].name : null,
+    has_contract: !!m.activeByVehicle[r.id],
     manager_name: m.u[r.manager_id] ? m.u[r.manager_id].name : null,
   }),
   drivers: (r, m) => {
@@ -549,7 +553,9 @@ const VIEWS = {
     return Object.assign({}, r, {
       manager_name: m.u[r.manager_id] ? m.u[r.manager_id].name : null,
       contract_id: c ? c.id : null, contract_type: c ? c.type : null,
-      vehicle_id: c ? c.vehicle_id : null, reg_number: c && m.v[c.vehicle_id] ? m.v[c.vehicle_id].reg_number : null,
+      vehicle_id: c ? c.vehicle_id : (m.carByDriver[r.id] ? m.carByDriver[r.id].id : null),
+      reg_number: c && m.v[c.vehicle_id] ? m.v[c.vehicle_id].reg_number : (m.carByDriver[r.id] ? m.carByDriver[r.id].reg_number : null),
+      car_without_contract: !c && !!m.carByDriver[r.id],
       daily_rate: c ? c.daily_rate : null,
       arrears: st ? st.arrears : null, days_behind: st ? st.days_behind : null,
       remaining_balance: st ? st.remaining_balance : null, progress: st ? st.progress : null,

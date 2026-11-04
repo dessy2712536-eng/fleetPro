@@ -20,7 +20,7 @@ export const vehiclesCfg = ({ dist, user }) => ({
     { key: 'reg_number', label: 'Car', sort: 'reg_number', render: r => <Plate to={`/vehicles/${r.id}`}>{r.reg_number}</Plate> },
     { key: 'make', label: 'Make & model', sort: 'make', render: r => <><strong>{r.make} {r.model}</strong><div className="dim">{r.year || ''} {human(r.type)} · {human(r.fuel_type)}</div></> },
     { key: 'manager_name', label: 'Manager', sort: 'manager_name', hideIn: 'manager_id', render: r => r.manager_name || <span className="txt-bad">No manager</span> },
-    { key: 'driver_name', label: 'Driver', render: r => r.driver_name || <span className="dim">No driver</span> },
+    { key: 'driver_name', label: 'Driver', render: r => !r.driver_name ? <span className="dim">No driver</span> : <>{r.driver_name}{r.has_contract === false && <div className="txt-warn small">No contract yet</div>}</> },
     { key: 'current_odometer', label: 'Odometer', num: true, sort: 'current_odometer', render: r => dist(r.current_odometer) },
     { key: 'insurance_expiry', label: 'Insurance', render: r => <ExpiryCell date={r.insurance_expiry} /> },
     { key: 'roadworthy_expiry', label: 'Roadworthy', render: r => <ExpiryCell date={r.roadworthy_expiry} /> },
@@ -39,7 +39,6 @@ export const vehiclesCfg = ({ dist, user }) => ({
     { name: 'color', label: 'Colour' },
     { name: 'vin', label: 'VIN / chassis number' },
     { name: 'current_odometer', label: 'Current odometer', type: 'number', hint: 'Updates automatically from trips, fuel and service records' },
-    { name: 'assigned_driver_id', label: 'Driver', type: 'driver', hint: 'Set automatically when you start a contract' },
     { name: 'purchase_date', label: 'Purchase date', type: 'date' },
     { name: 'purchase_price', label: 'Purchase price', type: 'number' },
     { name: 'insurance_expiry', label: 'Insurance expires', type: 'date' },
@@ -58,7 +57,7 @@ const isEV = make => /cerio|cireo|byd/i.test(make || '');
 /** Form fields for picking a car and the contract that goes with it. */
 export const carFields = ({ withHeading = true } = {}) => [
   ...(withHeading ? [{ name: 'car_heading', type: 'heading', label: 'Car', hint: 'Pick a car to give this driver now, or leave it empty and do it later.' }] : []),
-  { name: 'car_id', label: 'Car', type: 'carpick', span: 2,
+  { name: 'car_id', label: 'Car', type: 'carpick', span: 2, allowDriverId: null,
     derive: v => {
       const car = cachedOption('vehicle', v);
       if (!car) return {};
@@ -119,7 +118,9 @@ export const driversCfg = ({ money, user } = {}) => ({
   columns: [
     { key: 'name', label: 'Driver', sort: 'name', render: r => <><Link to={`/drivers/${r.id}`} className="strong-link">{r.name}</Link><div className="dim">{r.phone || ''}</div></> },
     { key: 'manager_name', label: 'Manager', sort: 'manager_name', hideIn: 'manager_id', render: r => r.manager_name || <span className="dim">None</span> },
-    { key: 'reg_number', label: 'Car', render: r => r.reg_number ? <><Plate to={`/vehicles/${r.vehicle_id}`}>{r.reg_number}</Plate><div className="dim">{human(r.contract_type)} · {money ? money(r.daily_rate) : r.daily_rate}/day</div></> : <span className="dim">No car</span> },
+    { key: 'reg_number', label: 'Car', render: r => !r.reg_number ? <span className="dim">No car</span> : r.car_without_contract
+        ? <><Plate to={`/vehicles/${r.vehicle_id}`}>{r.reg_number}</Plate><div className="txt-warn small">No contract yet</div></>
+        : <><Plate to={`/vehicles/${r.vehicle_id}`}>{r.reg_number}</Plate><div className="dim">{human(r.contract_type)} · {money ? money(r.daily_rate) : r.daily_rate}/day</div></> },
     { key: 'arrears', label: 'Owing', num: true, sort: 'arrears', render: r => r.arrears == null ? <span className="dim">—</span> : <Owing r={r} money={money} /> },
     { key: 'remaining_balance', label: 'Car balance', num: true, render: r => r.remaining_balance == null ? <span className="dim">—</span> : <>{money ? money(r.remaining_balance) : r.remaining_balance}<div className="dim">{r.progress}% paid</div></> },
     { key: 'intention', label: 'Latest feedback', render: r => r.intention ? <><Badge value={r.intention} /><div className="dim">{fmtDate(r.last_checkin_on)}</div></> : <span className="dim">No check-in</span> },

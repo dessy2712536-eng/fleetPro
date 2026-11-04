@@ -220,6 +220,18 @@ test('daily hire: any amount can be entered, and part-payments add up', () => {
   assert.equal(after.arrears, ctx.isPayDay(day, 'mon_sat') ? 150 : -550);
 });
 
+test('a car marked with a driver (no contract) still shows on the driver', () => {
+  const d = ok(as(admin, 'POST', '/drivers', { body: { name: 'Loose Link', status: 'active', manager_id: 1 } }));
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'LL-1', make: 'Toyota', model: 'Vitz', type: 'car', fuel_type: 'petrol', status: 'active', assigned_driver_id: d.id } }));
+  const dv = ok(as(admin, 'GET', `/drivers/${d.id}`));
+  assert.equal(dv.reg_number, 'LL-1'); assert.equal(dv.car_without_contract, true);
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${car.id}`)).has_contract, false);
+  ok(as(admin, 'POST', '/contracts', { body: { driver_id: d.id, vehicle_id: car.id, type: 'daily_hire', start_date: ctx.today(), status: 'active', daily_rate: 450 } }));
+  const after = ok(as(admin, 'GET', `/drivers/${d.id}`));
+  assert.equal(after.car_without_contract, false); assert.equal(after.contract_type, 'daily_hire');
+  assert.equal(ok(as(admin, 'GET', `/vehicles/${car.id}`)).has_contract, true);
+});
+
 test('payDays counts Monday–Saturday', () => {
   assert.equal(ctx.payDays('2026-11-02', '2026-11-08', 'mon_sat'), 6); // Mon..Sun
   assert.equal(ctx.payDays('2026-11-08', '2026-11-08', 'mon_sat'), 0); // Sunday

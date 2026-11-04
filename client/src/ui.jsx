@@ -95,11 +95,11 @@ export function useOptions(kind) {
 }
 
 /** Every car the user can see. Free cars can be picked; cars that already have a driver are shown but greyed out. */
-function CarPick({ value, onChange, ...rest }) {
+function CarPick({ value, onChange, allowDriverId, ...rest }) {
   const { user } = useApp();
   const all = useOptions('vehicle').filter(o => o.status !== 'disposed' && o.status !== 'handed_over');
-  const free = all.filter(o => !o.assigned_driver_id);
-  const taken = all.filter(o => o.assigned_driver_id);
+  const free = all.filter(o => !o.assigned_driver_id || (allowDriverId && o.assigned_driver_id === allowDriverId));
+  const taken = all.filter(o => o.assigned_driver_id && !(allowDriverId && o.assigned_driver_id === allowDriverId));
   const label = o => `${o.reg_number} · ${o.make} ${o.model}${o.status === 'in_maintenance' ? ' (in workshop)' : ''}${user.role === 'admin' && o.manager_name ? ` · ${o.manager_name}` : ''}`;
   return (
     <select value={value ?? ''} onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} {...rest}>
@@ -138,7 +138,7 @@ export function Field({ f, value, onChange, error, form }) {
       );
       break;
     case 'carpick':
-      input = <CarPick {...common} value={value} onChange={onChange} />;
+      input = <CarPick {...common} value={value} onChange={onChange} allowDriverId={f.allowDriverId} />;
       break;
     case 'vehicle': case 'driver': case 'schedule': case 'contract': case 'manager':
       input = <RefSelect {...common} kind={f.type} value={value} onChange={onChange} filterVehicle={form?.vehicle_id} onlyManager={f.onlyManager} onlyFree={f.onlyFree} />;

@@ -23,9 +23,14 @@ export function VehicleDetail() {
   const [tab, setTab] = useState('contracts');
   const [editing, setEditing] = useState(false);
   const [giving, setGiving] = useState(false);
+  const [activeContract, setActiveContract] = useState(undefined); // undefined = not loaded yet
 
   const loadSummary = useCallback(() => api(`/vehicles/${id}/summary`).then(setSummary).catch(() => {}), [id]);
   useEffect(() => { loadSummary(); }, [loadSummary]);
+  useEffect(() => {
+    api('/contracts', { query: { vehicle_id: id, status: 'active', limit: 1 } })
+      .then(r => setActiveContract(r.rows[0] || null)).catch(() => setActiveContract(undefined));
+  }, [id, summary]);
   const refresh = () => { load(); loadSummary(); };
 
   if (error) return <div className="form-error">{error} <Link to="/vehicles">Back to cars</Link></div>;
@@ -66,12 +71,18 @@ export function VehicleDetail() {
           </div>
           <Badge value={v.status} />
           <span className="spacer" />
-          {can('manager') && !v.assigned_driver_id && ['active', 'inactive', 'in_maintenance'].includes(v.status) && (
+          {can('manager') && (!v.assigned_driver_id || activeContract === null) && ['active', 'inactive', 'in_maintenance'].includes(v.status) && (
             <button className="btn primary" onClick={() => setGiving(true)} disabled={!v.manager_id} title={v.manager_id ? '' : 'Assign a manager first'}>Assign driver</button>
           )}
           {can('manager') && <button className="btn ghost" onClick={() => setEditing(true)}>Edit car</button>}
         </div>
       </div>
+      {v.assigned_driver_id && activeContract === null && (
+        <div className="notice warn">
+          <span><strong>{v.driver_name || 'A driver'} is down as driving this car, but there's no contract yet</strong>, so payments can't be recorded and the car doesn't show on the driver's page.</span>
+          {can('manager') && <button className="btn primary sm" onClick={() => setGiving(true)}>Set up contract</button>}
+        </div>
+      )}
       {!v.manager_id && <div className="notice warn"><span><strong>This car has no manager.</strong> Edit the car to choose one before giving it to a driver.</span></div>}
 
       {summary?.alerts?.length > 0 && (
@@ -111,7 +122,7 @@ export function VehicleDetail() {
         return (
           <Modal title={`Assign a driver to ${v.reg_number}`} onClose={() => setGiving(false)} wide>
             <RecordForm fields={fields}
-              initial={{ ...cc.defaults(), vehicle_id: v.id, type: /cerio|cireo|byd/i.test(v.make) ? 'daily_hire' : 'work_and_pay' }}
+              initial={{ ...cc.defaults(), vehicle_id: v.id, driver_id: activeContract === null ? v.assigned_driver_id : null, type: /cerio|cireo|byd/i.test(v.make) ? 'daily_hire' : 'work_and_pay' }}
               onSubmit={async f => {
                 await api('/contracts', { method: 'POST', body: { ...f, vehicle_id: v.id } });
                 notify(`${v.reg_number} assigned`); setGiving(false); invalidateOptions(); refresh(); setTab('contracts');
@@ -140,12 +151,16 @@ export function DriverDetail() {
   const [tab, setTab] = useState('payments');
   const [editing, setEditing] = useState(false);
   const [quick, setQuick] = useState(null); // 'payment' | 'checkin'
+  const [looseCar, setLooseCar] = useState(null);
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
     if (!d) return;
     if (d.contract_id) api(`/contracts/${d.contract_id}`).then(setContract).catch(() => {});
     else setContract(null);
+    // A car may be marked for this driver directly on the car, without a contract yet.
+    if (!d.contract_id) api('/vehicles', { query: { driver_id: d.id, limit: 1 } }).then(r => setLooseCar(r.rows[0] || null)).catch(() => {});
+    else setLooseCar(null);
   }, [d]);
   const refresh = () => { load(); setVersion(v => v + 1); };
 
@@ -208,7 +223,14 @@ export function DriverDetail() {
           </dl>
         </div>
       ) : (
-        <div className="notes">{d.name.split(' ')[0]} doesn't have a car yet.{can('manager') && d.status !== 'stopped' && <> <button className="link-btn" onClick={() => setQuick('car')}>Assign a car</button></>}</div>
+        looseCar ? (
+          <div className="notice warn">
+            <span><strong>{d.name.split(' ')[0]} is down as driving <Plate to={`/vehicles/${looseCar.id}`}>{looseCar.reg_number}</Plate>, but there's no contract yet</strong>, so payments can't be recorded.</span>
+            {can('manager') && <button className="btn primary sm" onClick={() => setQuick('car')}>Set up contract</button>}
+          </div>
+        ) : (
+          <div className="notes">{d.name.split(' ')[0]} doesn't have a car yet.{can('manager') && d.status !== 'stopped' && <> <button className="link-btn" onClick={() => setQuick('car')}>Assign a car</button></>}</div>
+        )
       )}
       {d.notes && <p className="notes">{d.notes}</p>}
 
@@ -226,16 +248,16 @@ export function DriverDetail() {
         </Modal>
       )}
       {quick === 'car' && (
-        <Modal title={`Assign a car to ${d.name}`} onClose={() => setQuick(null)} wide>
+        <Modal title={looseCar ? `Set up contract · ${d.name}` : `Assign a car to ${d.name}`} onClose={() => setQuick(null)} wide>
           <RecordForm
-            fields={carFields({ withHeading: false }).map(f => f.name === 'car_id' ? { ...f, required: true, hint: d.manager_name ? `Cars in ${d.manager_name}'s group can be given to ${d.name.split(' ')[0]}` : undefined } : f)}
-            initial={carDefaults()}
+            fields={carFields({ withHeading: false }).map(f => f.name === 'car_id' ? { ...f, allowDriverId: d.id, required: true, hint: d.manager_name ? `Cars in ${d.manager_name}'s group can be given to ${d.name.split(' ')[0]}` : undefined } : f)}
+            initial={{ ...carDefaults(), ...(looseCar ? { car_id: looseCar.id, c_type: /cerio|cireo|byd/i.test(looseCar.make) ? 'daily_hire' : 'work_and_pay' } : {}) }}
             onSubmit={async f => {
               if (!f.car_id) { const e = new Error('Choose a car'); e.details = { car_id: 'Required' }; throw e; }
               const c = await giveCar(d.id, f);
               notify(`${c.reg_number} assigned to ${d.name}`); setQuick(null); invalidateOptions(); refresh();
             }}
-            onCancel={() => setQuick(null)} submitLabel="Assign car" />
+            onCancel={() => setQuick(null)} submitLabel={looseCar ? 'Start contract' : 'Assign car'} />
         </Modal>
       )}
       {quick && quick !== 'car' && (
