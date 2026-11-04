@@ -13,6 +13,7 @@ export default function Settings() {
       <ChangePassword />
       {can('admin') && <Users />}
       {can('manager') && <Activity />}
+      {can('admin') && <StartAgain />}
     </>
   );
 }
@@ -59,6 +60,49 @@ function CarPrices() {
             <button type="button" className="btn primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save car prices'}</button>
           </footer>
         </div>
+      )}
+    </section>
+  );
+}
+
+/** Delete every car, driver and record, plus all non-admin users, so everything can be entered again. */
+function StartAgain() {
+  const { notify } = useApp();
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const run = async () => {
+    setBusy(true); setError('');
+    try {
+      const r = await api('/admin/reset', { method: 'POST', body: { confirm: typed } });
+      const n = r.removed || {};
+      notify(`Started again: removed ${n.vehicles || 0} cars, ${n.drivers || 0} drivers, ${n.payments || 0} payments and ${n.users || 0} users`);
+      setOpen(false); setTyped('');
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (e) { setError(e.message); setBusy(false); }
+  };
+  return (
+    <section className="panel settings-block danger-block">
+      <h2>Start again</h2>
+      <p>Permanently deletes <strong>all cars, drivers, contracts, payments, days off, check-ins, maintenance, expenses and the activity log</strong>, and <strong>every manager account</strong>. Admin accounts and these Settings (rates, car prices, deposits) are kept. This can't be undone.</p>
+      <p className="dim">Before you do this, make a backup: in your FleetPro Google Sheet choose <em>File → Make a copy</em>.</p>
+      <button type="button" className="btn danger" onClick={() => setOpen(true)}>Delete all data…</button>
+      {open && (
+        <Modal title="Delete all data?" onClose={() => !busy && setOpen(false)}>
+          <div className="form">
+            {error && <div className="form-error" role="alert">{error}</div>}
+            <p>Everything except admin accounts and Settings will be deleted from your Google Sheet. Have you made a backup copy of the Sheet?</p>
+            <div className="field">
+              <label htmlFor="confirm-delete">Type <strong>DELETE</strong> to confirm</label>
+              <input id="confirm-delete" value={typed} onChange={e => setTyped(e.target.value)} autoComplete="off" autoFocus />
+            </div>
+            <footer className="form-actions">
+              <button type="button" className="btn ghost" onClick={() => setOpen(false)} disabled={busy}>Cancel</button>
+              <button type="button" className="btn danger" onClick={run} disabled={typed !== 'DELETE' || busy}>{busy ? 'Deleting…' : 'Delete all data'}</button>
+            </footer>
+          </div>
+        </Modal>
       )}
     </section>
   );

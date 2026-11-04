@@ -19,6 +19,8 @@ const EXPENSE_CATS = ['tolls', 'parking', 'insurance', 'registration', 'tyres', 
 const MAINT_TYPES = ['service', 'repair', 'inspection', 'tyres', 'bodywork', 'other'];
 
 const vehicleRef = { type: 'ref', table: 'vehicles', label: 'vehicle' };
+/** Why a driver didn't work on a pay day. Workshop and maintenance are excused by default (the car was out of action). */
+const OFF_REASONS = ['sick', 'workshop', 'maintenance', 'accident', 'personal_emergency', 'funeral', 'police', 'other'];
 const driverRef = { type: 'ref', table: 'drivers', label: 'driver' };
 
 /** Editable fields per table (validation spec). id/created_at/updated_at are added automatically. */
@@ -150,6 +152,15 @@ const FIELDS = {
     recorded_by: { type: 'string', internal: true },
     notes: { type: 'string', max: 500 },
   },
+  // A pay day the driver didn't work. Excused days aren't owed; the others still are.
+  off_days: {
+    contract_id: { type: 'ref', table: 'contracts', label: 'contract', required: true },
+    date: { type: 'date', required: true },
+    reason: { type: 'enum', values: OFF_REASONS, required: true },
+    excused: { type: 'bool', default: 0 },
+    note: { type: 'string', max: 500 },
+    recorded_by: { type: 'string', internal: true },
+  },
   checkins: {
     driver_id: Object.assign({}, driverRef, { required: true }),
     vehicle_id: vehicleRef,
@@ -205,7 +216,15 @@ function ss() {
 
 const _checked = {};
 function sheetFor(table) {
-  const sh = ss().getSheetByName(table);
+  let sh = ss().getSheetByName(table);
+  // A tab added in a newer version of FleetPro is created the first time it's needed.
+  if (!sh && FIELDS[table]) {
+    sh = ss().insertSheet(table);
+    const cols = columnsOf(table);
+    sh.getRange(1, 1, 1, cols.length).setValues([cols]).setFontWeight('bold').setBackground('#263035').setFontColor('#ffffff');
+    sh.setFrozenRows(1);
+    sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@');
+  }
   if (!sh) throw new HttpError(500, `Missing sheet tab "${table}". Run setup() in Apps Script.`);
   // After a script update a tab may be missing new columns. Add them before anything is written,
   // so updating the code never shifts data into the wrong columns, even if setup() wasn't re-run.
@@ -534,10 +553,22 @@ function dueThrough() { return addDays(today(), -1); }
 
 const MONEY_TYPES = { daily: 1, adjustment: 1 };
 
+/** Days off for one contract (indexed once per request). */
+function offDaysFor(contractId) {
+  const rows = readAll('off_days');
+  if (!_cache.__offIdx || _cache.__offIdx.src !== rows) {
+    const idx = {};
+    rows.forEach(o => { (idx[o.contract_id] = idx[o.contract_id] || []).push(o); });
+    _cache.__offIdx = { src: rows, idx };
+  }
+  return _cache.__offIdx.idx[contractId] || [];
+}
+
 function contractStats(c, payments) {
   payments = payments || [];
   const paid = round(sum(payments.filter(p => MONEY_TYPES[p.type]), p => p.amount));
-  const waived = round(sum(payments.filter(p => p.type === 'waiver'), p => p.amount));
+  const offs = offDaysFor(c.id).filter(o => o.date >= c.start_date && o.date <= minDate(dueThrough(), contractLastDay(c)) && isPayDay(o.date, c.payment_days));
+  const waived = round(sum(payments.filter(p => p.type === 'waiver'), p => p.amount) + offs.filter(o => o.excused).length * (c.daily_rate || 0));
   const rate = c.daily_rate || 0;
   const dueDays = payDays(c.start_date, minDate(dueThrough(), contractLastDay(c)), c.payment_days);
   const expected = round(dueDays * rate);
@@ -553,7 +584,7 @@ function contractStats(c, payments) {
     let end = p.work_date; // an excused-days entry covers (amount ÷ daily rate) pay days from its work date
     for (let n = Math.round(p.amount / rate) - 1, i = 0; n > 0 && i < 60; i++) { end = addDays(end, 1); if (isPayDay(end, c.payment_days)) n--; }
     return end;
-  }).sort().slice(-1)[0];
+  }).concat(offDaysFor(c.id).map(o => o.date)).sort().slice(-1)[0];
   let next = covered ? addDays(covered, 1) : c.start_date;
   for (let i = 0; i < 7 && !isPayDay(next, c.payment_days); i++) next = addDays(next, 1);
   return {
@@ -626,6 +657,13 @@ const VIEWS = {
       driver_name: d.name, manager_id: d.manager_id || null, manager_name: m.u[d.manager_id] ? m.u[d.manager_id].name : null,
       reg_number: v.reg_number, make: v.make, model: v.model,
       car_condition: Object.keys(m.c).some(k => m.c[k].vehicle_id === r.vehicle_id && m.c[k].id < r.id && m.c[k].driver_id !== r.driver_id) ? 'retrieved' : 'new',
+    });
+  },
+  off_days: (r, m) => {
+    const c = m.c[r.contract_id] || {}, d = m.d[c.driver_id] || {}, v = m.v[c.vehicle_id] || {};
+    return Object.assign({}, r, {
+      driver_id: c.driver_id, driver_name: d.name, manager_id: d.manager_id || null,
+      vehicle_id: c.vehicle_id, reg_number: v.reg_number, daily_rate: c.daily_rate,
     });
   },
   payments: (r, m) => {
@@ -814,6 +852,28 @@ const RESOURCES = {
 };
 
 Object.assign(RESOURCES, {
+  'off-days': {
+    table: 'off_days', entity: 'Day off',
+    search: ['driver_name', 'reg_number', 'reason', 'note'],
+    filters: { contract_id: 'contract_id', driver_id: 'driver_id', vehicle_id: 'vehicle_id', manager_id: 'manager_id', reason: 'reason' },
+    dateColumn: 'date',
+    sortable: ['date', 'driver_name'],
+    defaultSort: ['date', 'desc'],
+    prepare: (d, prev, user) => { if (!prev) d.recorded_by = user ? user.name : null; },
+    check: (d, prev) => {
+      const c = findById('contracts', d.contract_id);
+      if (!c) return;
+      if (d.date < c.start_date) throw invalid('date', `The contract starts on ${c.start_date}`);
+      const last = contractLastDay(c);
+      if (last && d.date > last) throw invalid('date', `The contract ended on ${last}`);
+      if (d.date > today()) throw invalid('date', 'This day hasn\'t happened yet');
+      if (!isPayDay(d.date, c.payment_days)) throw invalid('date', 'Sundays are not pay days');
+      if (readAll('off_days').some(o => o.contract_id === c.id && o.date === d.date && o.id !== (prev ? prev.id : -1))) {
+        throw invalid('date', 'This day is already marked as a day off');
+      }
+    },
+    describe: r => `${r.driver_name || 'Driver'} · ${r.date} · ${String(r.reason).replace(/_/g, ' ')}${r.excused ? ' (excused)' : ''}`,
+  },
   contracts: {
     table: 'contracts', entity: 'Contract',
     search: ['driver_name', 'reg_number', 'deposit_reference', 'manager_name'],
@@ -1026,7 +1086,7 @@ function inGroup(table, r, mid, m) {
     case 'vehicles': return r.manager_id === mid;
     case 'drivers': return r.manager_id === mid;
     case 'contracts': return carMgr(r.vehicle_id) === mid || drvMgr(r.driver_id) === mid;
-    case 'payments': { const c = m.c[r.contract_id]; return !!c && (carMgr(c.vehicle_id) === mid || drvMgr(c.driver_id) === mid); }
+    case 'payments': case 'off_days': { const c = m.c[r.contract_id]; return !!c && (carMgr(c.vehicle_id) === mid || drvMgr(c.driver_id) === mid); }
     case 'checkins': return drvMgr(r.driver_id) === mid || (r.vehicle_id != null && carMgr(r.vehicle_id) === mid);
     case 'trips': case 'fuel_logs': return carMgr(r.vehicle_id) === mid || (r.driver_id != null && drvMgr(r.driver_id) === mid);
     default: return r.vehicle_id != null && carMgr(r.vehicle_id) === mid; // expenses, maintenance
@@ -1279,7 +1339,8 @@ function managerReport(q, user) {
     const daysDue = payDays(maxDate(r.from, c.start_date), minDate(r.to, due, contractLastDay(c)), c.payment_days);
     const expected = round(daysDue * c.daily_rate);
     const paid = round(sum(inPeriod.filter(p => MONEY_TYPES[p.type]), p => p.amount));
-    const waived = round(sum(inPeriod.filter(p => p.type === 'waiver'), p => p.amount));
+    const offInPeriod = offDaysFor(c.id).filter(o => o.excused && o.date >= r.from && o.date <= r.to && o.date <= due && isPayDay(o.date, c.payment_days));
+    const waived = round(sum(inPeriod.filter(p => p.type === 'waiver'), p => p.amount) + offInPeriod.length * (c.daily_rate || 0));
     const st = contractStats(c, pays);
     const ci = m.lastCheckin[c.driver_id];
     const carAlerts = alerts.filter(a => a.vehicle_id === c.vehicle_id && a.category === 'maintenance' && a.severity !== 'upcoming');
@@ -1344,7 +1405,7 @@ function dailyCollections(days, managerId) {
     let expected = 0, collected = 0;
     contracts.forEach(c => {
       const last = contractLastDay(c);
-      if (c.start_date <= day && (!last || last >= day) && isPayDay(day, c.payment_days)) expected += c.daily_rate || 0;
+      if (c.start_date <= day && (!last || last >= day) && isPayDay(day, c.payment_days) && !offDaysFor(c.id).some(o => o.excused && o.date === day)) expected += c.daily_rate || 0;
       collected += sum((m.pay[c.id] || []).filter(p => p.work_date === day && MONEY_TYPES[p.type]), p => p.amount);
     });
     out.push({ date: day, expected: round(expected), collected: round(collected) });
@@ -1362,7 +1423,7 @@ function collectionsSummary(managerId) {
   const payments = readAll('payments').filter(p => ids[p.contract_id] && MONEY_TYPES[p.type]);
   const yday = dailyCollections(1, managerId)[0];
   const unpaid = active.filter(c => c.start_date <= yesterday && isPayDay(yesterday, c.payment_days) &&
-    !(m.pay[c.id] || []).some(p => p.work_date === yesterday)).map(c => ({
+    !(m.pay[c.id] || []).some(p => p.work_date === yesterday) && !offDaysFor(c.id).some(o => o.excused && o.date === yesterday)).map(c => ({
       driver_id: c.driver_id, driver_name: (m.d[c.driver_id] || {}).name, reg_number: (m.v[c.vehicle_id] || {}).reg_number, daily_rate: c.daily_rate,
     }));
   return {
@@ -1657,6 +1718,20 @@ function route(method, path, q, body, token) {
     return publicUser(saved);
   }
 
+  // Start again: delete every car, driver and record, and all non-admin users. Admins and Settings are kept.
+  if (path === '/admin/reset' && method === 'POST') {
+    requireRole(user, 'admin');
+    if (String((body && body.confirm) || '') !== 'DELETE') throw invalid('confirm', 'Type DELETE to confirm');
+    const wipe = ['payments', 'off_days', 'contracts', 'checkins', 'trips', 'fuel_logs', 'expenses', 'maintenance_records', 'maintenance_schedules', 'vehicles', 'drivers', 'audit_log'];
+    const counts = {};
+    wipe.forEach(t => { if (FIELDS[t]) { counts[t] = readAll(t).length; writeAll(t, []); } });
+    const before = readAll('users');
+    writeAll('users', before.filter(u => u.role === 'admin'));
+    counts.users = before.length - readAll('users').length;
+    audit(user, 'delete', 'All data', null, `Started again: ${counts.vehicles || 0} cars, ${counts.drivers || 0} drivers, ${counts.payments || 0} payments, ${counts.users} users removed`);
+    return { ok: true, removed: counts };
+  }
+
   if (path === '/audit') {
     requireRole(user, 'manager');
     const limit = Math.min(parseInt(q.limit, 10) || 100, 500);
@@ -1665,7 +1740,7 @@ function route(method, path, q, body, token) {
   }
 
   // Resources: /vehicles, /vehicles/12, /maintenance/records/3 ...
-  mm = path.match(/^\/(vehicles|drivers|trips|fuel|expenses|contracts|payments|checkins|maintenance\/schedules|maintenance\/records)(?:\/(\d+))?$/);
+  mm = path.match(/^\/(vehicles|drivers|trips|fuel|expenses|contracts|payments|off-days|checkins|maintenance\/schedules|maintenance\/records)(?:\/(\d+))?$/);
   if (mm) {
     const res = RESOURCES[mm[1]];
     const id = mm[2] ? Number(mm[2]) : null;

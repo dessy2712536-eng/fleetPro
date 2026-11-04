@@ -331,6 +331,67 @@ test('CASH can be used as the reference more than once', () => {
   ok(as(admin, 'POST', '/payments', { body: { contract_id: c2.id, type: 'daily', work_date: c2.start_date, paid_on: ctx.today(), amount: 400, momo_reference: 'Cash' } }));
 });
 
+test('days off: reasons, excused days not owed, others still owed', () => {
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'OFF-1', make: 'Toyota', model: 'Vitz', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  const d = ok(as(admin, 'POST', '/drivers', { body: { name: 'Off Days', status: 'active', manager_id: 1 } }));
+  // start on a Monday 2 weeks ago so we know the pay days
+  let start = ctx.addDays(ctx.today(), -14);
+  while (new Date(start + 'T00:00:00Z').getUTCDay() !== 1) start = ctx.addDays(start, -1);
+  const c = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d.id, vehicle_id: car.id, type: 'work_and_pay', start_date: start, status: 'active', deposit_amount: 15000, deposit_reference: 'OFF-D' } }));
+  const before = ok(as(admin, 'GET', `/contracts/${c.id}`)).arrears;
+  const tue = ctx.addDays(start, 1), wed = ctx.addDays(start, 2), sun = ctx.addDays(start, 6);
+  ok(as(admin, 'POST', '/off-days', { body: { contract_id: c.id, date: tue, reason: 'workshop', excused: 1, note: 'Clutch' } }));
+  const sick = ok(as(admin, 'POST', '/off-days', { body: { contract_id: c.id, date: wed, reason: 'sick', excused: 0 } }));
+  assert.equal(sick.driver_name, 'Off Days'); assert.equal(sick.recorded_by, 'Administrator');
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).arrears, before - 400, 'only the excused day is taken off');
+  assert.equal(as(admin, 'POST', '/off-days', { body: { contract_id: c.id, date: tue, reason: 'sick' } }).details.date, 'This day is already marked as a day off');
+  assert.equal(as(admin, 'POST', '/off-days', { body: { contract_id: c.id, date: sun, reason: 'sick' } }).details.date, 'Sundays are not pay days');
+  assert.equal(as(admin, 'POST', '/off-days', { body: { contract_id: c.id, date: ctx.addDays(start, -1), reason: 'sick' } }).status, 422);
+  // excuse the sick day later
+  ok(as(admin, 'PUT', `/off-days/${sick.id}`, { body: { excused: 1 } }));
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).arrears, before - 800);
+  assert.equal(ok(as(admin, 'GET', '/off-days', { query: { contract_id: c.id } })).total, 2);
+  // another manager can't see or add days off for this driver
+  const mb = ok(as(admin, 'POST', '/users', { body: { name: 'Other Mgr', email: 'om@x.com', password: 'manager123', role: 'manager' } }));
+  const tb = ok(call('POST', '/auth/login', { body: { email: 'om@x.com', password: 'manager123' } })).token;
+  assert.equal(ok(as(tb, 'GET', '/off-days', { query: { contract_id: c.id } })).total, 0);
+  assert.equal(as(tb, 'POST', '/off-days', { body: { contract_id: c.id, date: ctx.addDays(start, 3), reason: 'sick' } }).status, 403);
+  assert.ok(mb.id);
+});
+
+test('Start again removes everything except admins and settings', () => {
+  // runs on a copy so the other tests keep their data
+  const { loadBackend } = require('./emulator');
+  const b2 = loadBackend(); b2.ctx.setup(); b2.ctx.loadDemoData();
+  const ok2 = r => { assert.equal(r.ok, true, JSON.stringify(r)); return r.data; };
+  const a2 = ok2(b2.call('POST', '/auth/login', { body: { email: 'admin@fleet.local', password: 'admin12345' } })).token;
+  const m2 = ok2(b2.call('POST', '/auth/login', { body: { email: 'manager@fleet.local', password: 'demo12345' } })).token;
+  ok2(b2.call('PUT', '/settings', { token: a2, body: { company_name: 'Naas Ventures' } }));
+  assert.equal(b2.call('POST', '/admin/reset', { token: m2, body: { confirm: 'DELETE' } }).status, 403, 'managers cannot reset');
+  assert.equal(b2.call('POST', '/admin/reset', { token: a2, body: { confirm: 'yes' } }).status, 422, 'must type DELETE');
+  const res = ok2(b2.call('POST', '/admin/reset', { token: a2, body: { confirm: 'DELETE' } }));
+  assert.ok(res.removed.vehicles > 0 && res.removed.users > 0);
+  assert.equal(ok2(b2.call('GET', '/vehicles', { token: a2 })).total, 0);
+  assert.equal(ok2(b2.call('GET', '/drivers', { token: a2 })).total, 0);
+  assert.equal(ok2(b2.call('GET', '/payments', { token: a2 })).total, 0);
+  assert.deepEqual(ok2(b2.call('GET', '/users', { token: a2 })).rows.map(u => u.role), ['admin']);
+  assert.equal(ok2(b2.call('GET', '/settings', { token: a2 })).company_name, 'Naas Ventures');
+  assert.equal(b2.call('GET', '/vehicles', { token: m2 }).status, 401, 'deleted manager is signed out');
+  // new data starts from id 1 again and works
+  const car = ok2(b2.call('POST', '/vehicles', { token: a2, body: { manager_id: 1, reg_number: 'NEW-1', make: 'Livan', model: 'X3 Pro', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  assert.equal(car.id, 1); assert.equal(car.condition, 'new');
+});
+
+test('a missing tab (from a newer version) is created automatically', () => {
+  const { loadBackend } = require('./emulator');
+  const b3 = loadBackend(); b3.ctx.setup();
+  b3.book.deleteSheet(b3.book.getSheetByName('off_days'));
+  const t3 = b3.call('POST', '/auth/login', { body: { email: 'admin@fleet.local', password: 'admin12345' } }).data.token;
+  const r = b3.call('GET', '/off-days', { token: t3 });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.ok(b3.book.getSheetByName('off_days'));
+});
+
 test('payDays counts Monday–Saturday', () => {
   assert.equal(ctx.payDays('2026-11-02', '2026-11-08', 'mon_sat'), 6); // Mon..Sun
   assert.equal(ctx.payDays('2026-11-08', '2026-11-08', 'mon_sat'), 0); // Sunday

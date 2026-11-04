@@ -348,3 +348,34 @@ tr.row-short td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 .price-rows { display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
 .price-row { display: grid; grid-template-columns: 2fr 1fr auto; gap: 8px; align-items: center; }
 @media (max-width: 520px) { .price-row { grid-template-columns: 1fr; } }
+
+/* Daily breakdown */
+.statement-summary { display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: flex-end; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px; margin-bottom: 8px; }
+.statement-summary > div { display: flex; flex-direction: column; }
+.statement-summary strong { font-family: var(--font-cond); font-size: 20px; font-variant-numeric: tabular-nums; }
+.statement-summary .btn { margin-left: auto; }
+.statement-month { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.statement-month-head { all: unset; box-sizing: border-box; width: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; padding: 12px 16px; cursor: pointer; }
+.statement-month-head:hover { background: var(--hover); }
+.statement-month-head:focus-visible { outline: 3px solid var(--hivis); outline-offset: -3px; }
+.statement-month-head .chev { width: 12px; }
+.statement-table td, .statement-table th { padding: 7px 12px; }
+.statement-table tr.st-unpaid td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
+.statement-table tr.st-part td:first-child { box-shadow: inset 3px 0 0 var(--hivis); }
+.statement-table tr.st-excused td, .statement-table tr.st-not_due td { color: var(--ink-2); }
+
+.statement-table tr.st-off_owed td:first-child { box-shadow: inset 3px 0 0 var(--hivis); }
+.reason-picks { border: 0; margin: 0 0 14px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.reason-picks legend { font-weight: 600; font-size: 14px; margin-bottom: 8px; padding: 0; }
+.reason-pick { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-2); border-radius: 20px; padding: 6px 12px; cursor: pointer; font-size: 14px; background: var(--surface); }
+.reason-pick input { margin: 0; }
+.reason-pick.on { background: var(--asphalt); color: #fff; border-color: var(--asphalt); }
+.reason-pick:focus-within { outline: 3px solid var(--hivis); outline-offset: 2px; }
+.check.excuse { align-items: flex-start; margin-bottom: 14px; line-height: 1.4; }
+.check.excuse input { margin-top: 3px; }
+
+.btn.danger { background: var(--bad); color: #fff; }
+.btn.danger:hover { filter: brightness(0.92); }
+.btn.danger:disabled { opacity: 0.45; }
+.danger-block { border-color: #EEC2BA; }
+.danger-block h2 { color: var(--bad); }

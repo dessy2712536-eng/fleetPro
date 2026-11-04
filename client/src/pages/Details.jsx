@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import DailyStatement from './DailyStatement';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useApp } from '../context';
@@ -200,7 +201,7 @@ export function DriverDetail() {
   const navigate = useNavigate();
   const { row: d, error, load } = useRecord(`/drivers/${id}`);
   const [contract, setContract] = useState(null);
-  const [tab, setTab] = useState('payments');
+  const [tab, setTab] = useState('statement');
   const [editing, setEditing] = useState(false);
   const [quick, setQuick] = useState(null); // 'payment' | 'checkin'
   const [looseCar, setLooseCar] = useState(null);
@@ -289,11 +290,13 @@ export function DriverDetail() {
       <PaidByContract query={{ driver_id: Number(id) }} mode="driver" reloadKey={version} />
 
       <div className="tabs" role="tablist">
-        {[['payments', 'Payments'], ['checkins', 'Check-ins'], ['contracts', 'Contracts'], ['trips', 'Trips']].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}</button>)}
+        {[...(contract ? [['statement', 'Daily breakdown']] : []), ['payments', 'Payments'], ['checkins', 'Check-ins'], ['contracts', 'Contracts'], ['trips', 'Trips']].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}</button>)}
       </div>
-      <ResourceTable key={tab + version}
-        cfg={{ payments: payCfg, checkins: ciCfg, contracts: contractsCfg(app), trips: tripsCfg(app) }[tab]}
-        fixed={{ driver_id: Number(id) }} embedded onChanged={refresh} />
+      {tab === 'statement' && contract ? <DailyStatement contract={contract} driverName={d.name} reloadKey={version} onChanged={() => load()} /> : (
+        <ResourceTable key={tab + version}
+          cfg={{ payments: payCfg, checkins: ciCfg, contracts: contractsCfg(app), trips: tripsCfg(app) }[tab === 'statement' ? 'payments' : tab]}
+          fixed={{ driver_id: Number(id) }} embedded onChanged={refresh} />
+      )}
 
       {editing && (
         <Modal title={`Edit ${d.name}`} onClose={() => setEditing(false)} wide>
