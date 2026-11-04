@@ -75,7 +75,6 @@ export const carFields = ({ withHeading = true } = {}) => [
   { name: 'c_type', label: 'Arrangement', type: 'select', options: ['work_and_pay', 'daily_hire'], required: true, showIf: hasCar, hint: 'Work & pay: driver owns the car after the term. Daily hire: e.g. Cerio, BYD' },
   { name: 'c_start_date', label: 'Start date', type: 'date', required: true, showIf: hasCar },
   { name: 'c_daily_rate', label: 'Daily payment', type: 'number', showIf: hasCar, hint: 'Leave empty for the standard rate (400 work & pay, Cerio 500, BYD 700)' },
-  { name: 'c_paid_so_far', label: 'Total paid so far', type: 'number', showIf: hasCar, hint: 'Only for drivers who started before FleetPro: their payments up to yesterday' },
   { name: 'c_deposit_amount', label: 'Security deposit', type: 'number', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay', hint: f => depositHint(cachedOption('vehicle', f.car_id)) },
   { name: 'c_deposit_reference', label: 'Deposit MoMo reference', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
   { name: 'c_deposit_date', label: 'Deposit paid on', type: 'date', showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
