@@ -1,5 +1,6 @@
 import { Badge, ExpiryCell, Plate, cachedOption, daysAgo, fmtDate, fmtDateTime, human, nowLocal, todayStr } from './ui';
 import { Link } from 'react-router-dom';
+import { api, ApiError } from './api';
 
 // Formatting functions are injected per render (they depend on currency settings).
 export const VEHICLE_TYPES = ['car', 'suv', 'pickup', 'van', 'truck', 'bus', 'motorbike', 'equipment', 'other'];
@@ -50,6 +51,61 @@ export const vehiclesCfg = ({ dist, user }) => ({
 
 const mineFirst = user => (user && user.role === 'manager' ? { manager_id: user.id } : {});
 
+// ---------- Giving a driver a car (used by Add driver and Assign car) ----------
+const hasCar = f => !!f.car_id;
+const isEV = make => /cerio|cireo|byd/i.test(make || '');
+
+/** Form fields for picking a car and the contract that goes with it. */
+export const carFields = ({ withHeading = true } = {}) => [
+  ...(withHeading ? [{ name: 'car_heading', type: 'heading', label: 'Car', hint: 'Pick a car to give this driver now, or leave it empty and do it later.' }] : []),
+  { name: 'car_id', label: 'Car', type: 'carpick', span: 2,
+    derive: v => {
+      const car = cachedOption('vehicle', v);
+      if (!car) return {};
+      return { ...(car.manager_id ? { manager_id: car.manager_id } : {}), c_type: isEV(car.make) ? 'daily_hire' : 'work_and_pay' };
+    } },
+  { name: 'c_type', label: 'Arrangement', type: 'select', options: ['work_and_pay', 'daily_hire'], required: true, showIf: hasCar, hint: 'Work & pay: driver owns the car after the term. Daily hire: e.g. Cerio, BYD' },
+  { name: 'c_start_date', label: 'Start date', type: 'date', required: true, showIf: hasCar },
+  { name: 'c_daily_rate', label: 'Daily payment', type: 'number', showIf: hasCar, hint: 'Leave empty for the standard rate (400 work & pay, Cerio 500, BYD 700)' },
+  { name: 'c_paid_so_far', label: 'Total paid so far', type: 'number', showIf: hasCar, hint: 'Only for drivers who started before FleetPro: their payments up to yesterday' },
+  { name: 'c_deposit_amount', label: 'Security deposit', type: 'number', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay', hint: '5,000–10,000: retrieved car · 15,000: new car' },
+  { name: 'c_deposit_reference', label: 'Deposit MoMo reference', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
+  { name: 'c_deposit_date', label: 'Deposit paid on', type: 'date', showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
+];
+export const carDefaults = () => ({ c_type: 'work_and_pay', c_start_date: todayStr(), c_deposit_date: todayStr() });
+
+// Contract errors come back with contract field names; show them on the matching form fields.
+const CONTRACT_TO_FORM = { vehicle_id: 'car_id', driver_id: 'car_id', type: 'c_type', start_date: 'c_start_date', daily_rate: 'c_daily_rate', deposit_amount: 'c_deposit_amount', deposit_reference: 'c_deposit_reference', deposit_date: 'c_deposit_date', end_date: 'c_start_date' };
+
+/** Start a contract between a driver and the car picked in the form. Returns the contract. */
+export async function giveCar(driverId, f) {
+  const isWP = f.c_type === 'work_and_pay';
+  let contract;
+  try {
+    contract = await api('/contracts', { method: 'POST', body: {
+      driver_id: driverId, vehicle_id: f.car_id, type: f.c_type, status: 'active', start_date: f.c_start_date,
+      daily_rate: f.c_daily_rate || null, payment_days: 'mon_sat',
+      deposit_amount: isWP ? f.c_deposit_amount : null, deposit_reference: isWP ? f.c_deposit_reference : null,
+      deposit_date: isWP ? (f.c_deposit_date || f.c_start_date) : null,
+    } });
+  } catch (e) {
+    const details = {};
+    Object.entries(e.details || {}).forEach(([k, v]) => { details[CONTRACT_TO_FORM[k] || k] = v; });
+    throw new ApiError(e.status, e.message, details);
+  }
+  if (Number(f.c_paid_so_far) > 0) {
+    const y = new Date(); y.setDate(y.getDate() - 1);
+    const yesterday = y.toISOString().slice(0, 10);
+    await api('/payments', { method: 'POST', body: {
+      contract_id: contract.id, type: 'adjustment', paid_on: todayStr(), amount: Number(f.c_paid_so_far),
+      work_date: yesterday < f.c_start_date ? f.c_start_date : yesterday, notes: 'Total paid before FleetPro (opening balance)',
+    } }).catch(() => { /* the contract stands; the opening balance can be added under Payments */ });
+  }
+  return contract;
+}
+
+const DRIVER_KEYS = ['name', 'status', 'manager_id', 'phone', 'momo_number', 'id_number', 'license_number', 'license_class', 'license_expiry', 'hire_date', 'email', 'notes'];
+
 export const driversCfg = ({ money, user } = {}) => ({
   endpoint: '/drivers', singular: 'Driver', exportName: 'drivers',
   searchPlaceholder: 'Search name, phone, MoMo number, car',
@@ -70,13 +126,31 @@ export const driversCfg = ({ money, user } = {}) => ({
     { key: 'license_expiry', label: 'Licence', sort: 'license_expiry', render: r => <ExpiryCell date={r.license_expiry} /> },
     { key: 'status', label: 'Status', sort: 'status', render: r => <Badge value={r.status} /> },
   ],
-  defaults: () => ({ status: 'active', ...(user && user.role === 'manager' ? { manager_id: user.id } : {}) }),
+  defaults: () => ({ status: 'active', __new: true, ...carDefaults(), ...(user && user.role === 'manager' ? { manager_id: user.id } : {}) }),
+  // A new driver can be given a car in the same step. If the car can't be given, the driver isn't kept,
+  // so pressing Save again never creates the same driver twice.
+  save: async (form, editing) => {
+    const body = Object.fromEntries(DRIVER_KEYS.filter(k => k in form).map(k => [k, form[k]]));
+    if (editing && editing.id) { await api(`/drivers/${editing.id}`, { method: 'PUT', body }); return 'Driver updated'; }
+    if (form.car_id && !body.hire_date) body.hire_date = form.c_start_date;
+    const driver = await api('/drivers', { method: 'POST', body });
+    if (!form.car_id) return 'Driver added';
+    try {
+      const c = await giveCar(driver.id, form);
+      return `${driver.name} added and given ${c.reg_number}`;
+    } catch (e) {
+      await api(`/drivers/${driver.id}`, { method: 'DELETE' }).catch(() => {});
+      throw e;
+    }
+  },
   fields: [
     { name: 'name', label: 'Full name', required: true },
     { name: 'status', label: 'Status', type: 'select', options: ['active', 'on_leave', 'stopped'], required: true },
     { name: 'manager_id', label: 'Manager', type: 'manager', hint: 'The manager this driver reports to' },
     { name: 'phone', label: 'Phone' },
     { name: 'momo_number', label: 'MTN MoMo number', hint: 'Number the driver pays from' },
+    ...carFields().map(f => ({ ...f, showIf: form => !!form.__new && (!f.showIf || f.showIf(form)) })),
+    { name: 'details_heading', type: 'heading', label: 'Licence and other details', showIf: form => !!form.__new },
     { name: 'id_number', label: 'Ghana Card number' },
     { name: 'license_number', label: 'Licence number' },
     { name: 'license_class', label: 'Licence class' },

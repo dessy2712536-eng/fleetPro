@@ -72,11 +72,28 @@ export function useOptions(kind) {
       cache[kind] = r.rows.map(x => ({
         value: x.id, label: label(x),
         vehicle_id: x.vehicle_id, status: x.status, daily_rate: x.daily_rate, type: x.type, contract_id: x.contract_id, next_unpaid_day: x.next_unpaid_day, manager_id: x.manager_id,
+        reg_number: x.reg_number, make: x.make, model: x.model, assigned_driver_id: x.assigned_driver_id, driver_name: x.driver_name, manager_name: x.manager_name,
       })).sort((a, b) => (kind === 'contract' ? (a.status === 'active' ? 0 : 1) - (b.status === 'active' ? 0 : 1) : 0) || a.label.localeCompare(b.label));
       setOpts(cache[kind]);
     }).catch(() => {});
   }, [kind]);
   return opts;
+}
+
+/** Every car the user can see. Free cars can be picked; cars that already have a driver are shown but greyed out. */
+function CarPick({ value, onChange, ...rest }) {
+  const { user } = useApp();
+  const all = useOptions('vehicle').filter(o => o.status !== 'disposed' && o.status !== 'handed_over');
+  const free = all.filter(o => !o.assigned_driver_id);
+  const taken = all.filter(o => o.assigned_driver_id);
+  const label = o => `${o.reg_number} · ${o.make} ${o.model}${o.status === 'in_maintenance' ? ' (in workshop)' : ''}${user.role === 'admin' && o.manager_name ? ` · ${o.manager_name}` : ''}`;
+  return (
+    <select value={value ?? ''} onChange={e => onChange(e.target.value === '' ? null : Number(e.target.value))} {...rest}>
+      <option value="">{all.length ? 'No car for now' : 'No cars yet – add cars first'}</option>
+      {free.length > 0 && <optgroup label={`Available (${free.length})`}>{free.map(o => <option key={o.value} value={o.value}>{label(o)}</option>)}</optgroup>}
+      {taken.length > 0 && <optgroup label={`Already has a driver (${taken.length})`}>{taken.map(o => <option key={o.value} value={o.value} disabled>{label(o)} – {o.driver_name || 'driver'}</option>)}</optgroup>}
+    </select>
+  );
 }
 
 function RefSelect({ kind, value, onChange, filterVehicle, onlyManager, onlyFree, ...rest }) {
@@ -106,9 +123,14 @@ export function Field({ f, value, onChange, error, form }) {
         </select>
       );
       break;
+    case 'carpick':
+      input = <CarPick {...common} value={value} onChange={onChange} />;
+      break;
     case 'vehicle': case 'driver': case 'schedule': case 'contract': case 'manager':
       input = <RefSelect {...common} kind={f.type} value={value} onChange={onChange} filterVehicle={form?.vehicle_id} onlyManager={f.onlyManager} onlyFree={f.onlyFree} />;
       break;
+    case 'heading':
+      return <div className="form-heading span-2"><h3>{f.label}</h3>{f.hint && <small className="hint">{f.hint}</small>}</div>;
     case 'textarea':
       input = <textarea {...common} rows={3} value={value ?? ''} onChange={e => onChange(e.target.value)} />;
       break;
@@ -209,9 +231,11 @@ export function ResourceTable({ cfg, fixed: fixedProp = NO_FIXED, embedded = fal
 
   const save = async form => {
     const body = { ...form };
-    if (editing.id) await api(`${cfg.endpoint}/${editing.id}`, { method: 'PUT', body });
+    let message = null;
+    if (cfg.save) message = await cfg.save(body, editing);
+    else if (editing.id) await api(`${cfg.endpoint}/${editing.id}`, { method: 'PUT', body });
     else await api(cfg.endpoint, { method: 'POST', body });
-    notify(editing.id ? `${cfg.singular} updated` : `${cfg.singular} added`);
+    notify(message || (editing.id ? `${cfg.singular} updated` : `${cfg.singular} added`));
     setEditing(null);
     invalidateOptions();
     load();

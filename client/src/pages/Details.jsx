@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { useApp } from '../context';
 import { Badge, ExpiryCell, Modal, Plate, RecordForm, ResourceTable, daysAgo, fmtDate, human, invalidateOptions, todayStr } from '../ui';
-import { Owing, checkinsCfg, contractsCfg, driversCfg, expensesCfg, fuelCfg, paymentsCfg, recordsCfg, schedulesCfg, tripsCfg, vehiclesCfg } from '../resources';
+import { Owing, carDefaults, carFields, giveCar, checkinsCfg, contractsCfg, driversCfg, expensesCfg, fuelCfg, paymentsCfg, recordsCfg, schedulesCfg, tripsCfg, vehiclesCfg } from '../resources';
 
 function useRecord(path) {
   const [row, setRow] = useState(null);
@@ -182,6 +182,7 @@ export function DriverDetail() {
           {d.intention && <Badge value={d.intention} />}
           <span className="spacer" />
           {can('manager') && contract && contract.status === 'active' && <button className="btn primary" onClick={() => setQuick('payment')}>Record payment</button>}
+          {can('manager') && !d.contract_id && d.status !== 'stopped' && <button className="btn primary" onClick={() => setQuick('car')}>Assign car</button>}
           {can('manager') && <button className="btn ghost" onClick={() => setQuick('checkin')}>Add check-in</button>}
           {can('manager') && <button className="btn ghost" onClick={() => setEditing(true)}>Edit</button>}
         </div>
@@ -206,7 +207,7 @@ export function DriverDetail() {
           </dl>
         </div>
       ) : (
-        <div className="notes">No active contract. {can('manager') && <Link to="/contracts">Start a contract</Link>} to give {d.name.split(' ')[0]} a car.</div>
+        <div className="notes">{d.name.split(' ')[0]} doesn't have a car yet.{can('manager') && d.status !== 'stopped' && <> <button className="link-btn" onClick={() => setQuick('car')}>Assign a car</button></>}</div>
       )}
       {d.notes && <p className="notes">{d.notes}</p>}
 
@@ -223,7 +224,20 @@ export function DriverDetail() {
           <div className="danger-zone"><button className="link-btn danger" onClick={remove}>Delete this driver</button></div>
         </Modal>
       )}
-      {quick && (
+      {quick === 'car' && (
+        <Modal title={`Assign a car to ${d.name}`} onClose={() => setQuick(null)} wide>
+          <RecordForm
+            fields={carFields({ withHeading: false }).map(f => f.name === 'car_id' ? { ...f, required: true, hint: d.manager_name ? `Cars in ${d.manager_name}'s group can be given to ${d.name.split(' ')[0]}` : undefined } : f)}
+            initial={carDefaults()}
+            onSubmit={async f => {
+              if (!f.car_id) { const e = new Error('Choose a car'); e.details = { car_id: 'Required' }; throw e; }
+              const c = await giveCar(d.id, f);
+              notify(`${c.reg_number} assigned to ${d.name}`); setQuick(null); invalidateOptions(); refresh();
+            }}
+            onCancel={() => setQuick(null)} submitLabel="Assign car" />
+        </Modal>
+      )}
+      {quick && quick !== 'car' && (
         <Modal title={quick === 'payment' ? `Record payment · ${d.name}` : `Check-in · ${d.name}`} onClose={() => setQuick(null)} wide>
           <RecordForm
             fields={(quick === 'payment' ? payCfg : ciCfg).fields.filter(f => f.name !== (quick === 'payment' ? 'contract_id' : 'driver_id'))}
