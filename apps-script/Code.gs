@@ -1603,6 +1603,7 @@ const SETTING_FIELDS = {
   rate_other_daily: { type: 'number', min: 1 }, contract_years: { type: 'int', min: 1, max: 15 },
   deposit_min: { type: 'number', min: 0 }, deposit_new_car: { type: 'number', min: 0 }, arrears_alert_days: { type: 'int', min: 1, max: 60 },
   model_prices: { type: 'string', max: 5000 },
+  logo: { type: 'string', max: 45000 },
 };
 
 function route(method, path, q, body, token) {
@@ -1610,6 +1611,8 @@ function route(method, path, q, body, token) {
   q = q || {};
 
   if (path === '/health') return { ok: true };
+  // Company name and logo for the sign-in page (no sign-in needed; nothing private).
+  if (path === '/branding') { const st = getSettings(); return { company_name: st.company_name, logo: st.logo || null }; }
   if (path === '/auth/login' && method === 'POST') {
     const email = String((body && body.email) || '').trim().toLowerCase();
     const user = readAll('users').find(u => String(u.email).toLowerCase() === email);
@@ -1663,6 +1666,10 @@ function route(method, path, q, body, token) {
     if (method === 'GET') return getSettings();
     requireRole(user, 'admin');
     const data = validate(body || {}, SETTING_FIELDS, true);
+    if (data.logo != null && data.logo !== '' && !/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(data.logo)) {
+      throw invalid('logo', 'The logo must be a PNG, JPG or WebP image');
+    }
+    if (data.logo === null && body && body.logo === '') data.logo = '';
     if (data.model_prices != null) {
       let parsed;
       try { parsed = JSON.parse(data.model_prices); } catch (e) { parsed = null; }

@@ -403,6 +403,18 @@ test('startAgain() run from the editor clears everything but admins', () => {
   assert.deepEqual(b4.call('GET', '/users', { token: t4 }).data.rows.map(u => u.role), ['admin']);
 });
 
+test('company logo: saved by admins, shown on the sign-in page, can be removed', () => {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  ok(as(admin, 'PUT', '/settings', { body: { logo: png, company_name: 'Naas Ventures' } }));
+  const pub = ok(call('GET', '/branding'));
+  assert.equal(pub.logo, png); assert.equal(pub.company_name, 'Naas Ventures');
+  assert.equal(as(admin, 'PUT', '/settings', { body: { logo: '<svg onload=alert(1)>' } }).status, 422);
+  assert.equal(as(admin, 'PUT', '/settings', { body: { logo: 'data:image/png;base64,' + 'A'.repeat(46000) } }).status, 422, 'too big for a sheet cell');
+  ok(as(admin, 'PUT', '/settings', { body: { logo: '' } }));
+  assert.equal(ok(call('GET', '/branding')).logo, null);
+  ok(as(admin, 'PUT', '/settings', { body: { company_name: 'My Fleet' } }));
+});
+
 test('payDays counts Monday–Saturday', () => {
   assert.equal(ctx.payDays('2026-11-02', '2026-11-08', 'mon_sat'), 6); // Mon..Sun
   assert.equal(ctx.payDays('2026-11-08', '2026-11-08', 'mon_sat'), 0); // Sunday

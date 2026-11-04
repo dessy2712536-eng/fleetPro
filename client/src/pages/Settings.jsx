@@ -108,6 +108,68 @@ function StartAgain() {
   );
 }
 
+/** Shrink an image file to a small data URL that fits in one Google Sheets cell (under ~44,000 characters). */
+async function shrinkLogo(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('bad image')); i.src = url; });
+    let side = 256;
+    for (let attempt = 0; attempt < 8; attempt++, side = Math.round(side * 0.8)) {
+      const scale = Math.min(1, side / Math.max(img.naturalWidth || side, img.naturalHeight || side));
+      const w = Math.max(1, Math.round((img.naturalWidth || side) * scale)), h = Math.max(1, Math.round((img.naturalHeight || side) * scale));
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      let data = c.toDataURL('image/webp', 0.85);
+      if (!data.startsWith('data:image/webp')) data = c.toDataURL('image/png'); // browsers without WebP
+      if (data.length > 44000) {
+        const j = document.createElement('canvas'); j.width = w; j.height = h;
+        const ctx = j.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);
+        const jpg = j.toDataURL('image/jpeg', 0.82);
+        if (jpg.length < data.length) data = jpg;
+      }
+      if (data.length <= 44000) return data;
+    }
+    throw new Error('too big');
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function LogoUpload() {
+  const { settings, setSettings, notify } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const save = async logo => {
+    setBusy(true); setError('');
+    try { setSettings(await api('/settings', { method: 'PUT', body: { logo } })); notify(logo ? 'Logo saved' : 'Logo removed'); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  const onFile = async e => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    if (!/^image\//.test(f.type)) { setError('Choose an image file (PNG, JPG or WebP).'); return; }
+    try { await save(await shrinkLogo(f)); }
+    catch { setError("Couldn't use that image. Try a PNG or JPG."); }
+  };
+  return (
+    <div className="logo-row">
+      <div className="logo-preview" aria-hidden>{settings.logo ? <img src={settings.logo} alt="" /> : <span className="dim">No logo</span>}</div>
+      <div className="logo-actions">
+        <strong>Logo</strong>
+        <span className="dim small">Shown next to your company name in the menu and on the sign-in page. A square logo works best; it's resized automatically.</span>
+        <div className="upload-row">
+          <label className={`btn ghost sm file-btn ${busy ? 'is-loading' : ''}`}>
+            {busy ? 'Saving…' : settings.logo ? 'Change logo' : 'Upload logo'}
+            <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" onChange={onFile} disabled={busy} />
+          </label>
+          {settings.logo && <button type="button" className="link-btn danger" onClick={() => save('')} disabled={busy}>Remove</button>}
+        </div>
+        {error && <span className="err">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
 function CompanySettings() {
   const { settings, setSettings, can, notify } = useApp();
   const fields = [
@@ -137,6 +199,7 @@ function CompanySettings() {
   return (
     <section className="panel settings-block">
       <h2>Company</h2>
+      <LogoUpload />
       <RecordForm key={key} fields={fields} initial={settings} submitLabel="Save settings" onCancel={() => setKey(k => k + 1)}
         onSubmit={async f => { setSettings(await api('/settings', { method: 'PUT', body: f })); notify('Settings saved'); }} />
     </section>

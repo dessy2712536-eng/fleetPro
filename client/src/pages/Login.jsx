@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useApp } from '../context';
 import { apiUrl } from '../api';
+import { Brand } from '../ui';
 
 export default function Login() {
   const { login } = useApp();
@@ -21,7 +22,7 @@ export default function Login() {
     <div className="login-screen">
       <div className="login-road" aria-hidden />
       <form className="login-card" onSubmit={submit}>
-        <div className="brand big"><span className="brand-mark" />FleetPro</div>
+        <Brand big />
         <p className="sub">Sign in to manage drivers, daily payments and cars.</p>
         {!apiUrl() && (
           <div className="form-error" role="alert">

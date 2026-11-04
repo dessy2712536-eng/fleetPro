@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useApp } from './context';
+import { Brand } from './ui';
 import { api } from './api';
 
 const NAV = [
@@ -36,8 +37,8 @@ export default function Layout() {
   return (
     <div className={`shell ${open ? 'nav-open' : ''}`}>
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark" />FleetPro</div>
-        <div className="company">{settings.company_name}</div>
+        <Brand />
+        <div className="company">{settings.logo ? 'FleetPro' : settings.company_name}</div>
         <nav>
           {NAV.map((n, i) => n.group !== undefined ? <div key={i} className="nav-group">{n.group}</div> : (
             <NavLink key={n.to} to={n.to} end={n.end}>
@@ -53,7 +54,7 @@ export default function Layout() {
       </aside>
       <div className="topbar">
         <button className="icon-btn" onClick={() => setOpen(o => !o)} aria-label="Menu">☰</button>
-        <div className="brand"><span className="brand-mark" />FleetPro</div>
+        <Brand />
       </div>
       <div className="scrim" onClick={() => setOpen(false)} />
       <main className="content"><Outlet /></main>

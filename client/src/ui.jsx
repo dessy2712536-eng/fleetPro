@@ -18,6 +18,21 @@ const formatGhanaCardTyping = v => {
   return `GHA-${d.slice(0, 9)}${d.length > 9 ? '-' + d.slice(9) : ''}`;
 };
 
+/** The company's logo and name when a logo is set; otherwise the FleetPro mark. */
+export function Brand({ big = false }) {
+  const { branding } = useApp();
+  const name = branding.company_name && branding.company_name !== 'My Fleet' ? branding.company_name : null;
+  if (branding.logo) {
+    return (
+      <div className={`brand has-logo ${big ? 'big' : ''}`}>
+        <img src={branding.logo} alt="" className="brand-logo" />
+        <span className="brand-name">{name || 'FleetPro'}</span>
+      </div>
+    );
+  }
+  return <div className={`brand ${big ? 'big' : ''}`}><span className="brand-mark" />{big && name ? name : 'FleetPro'}</div>;
+}
+
 export const human = v => (v == null || v === '' ? '—' : ACRONYMS[v] || String(v).replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase()));
 export const fmtDate = v => (v ? new Date(v.length === 10 ? v + 'T00:00' : v).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 export const fmtDateTime = v => (v ? new Date(v).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');

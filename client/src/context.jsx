@@ -10,7 +10,16 @@ export function AppProvider({ children }) {
   const [ready, setReady] = useState(false);
   const [toast, setToast] = useState(null);
 
-  const loadSettings = useCallback(() => api('/settings').then(setSettings).catch(() => {}), []);
+  // Company name + logo, remembered in the browser so the sign-in page can show them straight away.
+  const [branding, setBranding] = useState(() => { try { return JSON.parse(localStorage.getItem('fleetpro_branding') || 'null') || {}; } catch { return {}; } });
+  const remember = b => { const v = { company_name: b.company_name || '', logo: b.logo || null }; setBranding(v); try { localStorage.setItem('fleetpro_branding', JSON.stringify(v)); } catch { /* private mode */ } };
+  const applySettings = useCallback(s => { setSettings(s); remember(s); }, []);
+  const loadSettings = useCallback(() => api('/settings').then(applySettings).catch(() => {}), [applySettings]);
+  useEffect(() => { api('/branding').then(remember).catch(() => {}); }, []);
+  useEffect(() => {
+    const name = (user ? settings.company_name : branding.company_name) || '';
+    document.title = name && name !== 'My Fleet' ? `${name} · FleetPro` : 'FleetPro';
+  }, [user, settings.company_name, branding.company_name]);
 
   useEffect(() => {
     const onLogout = () => setUser(null);
@@ -43,7 +52,7 @@ export function AppProvider({ children }) {
   const dist = n => n == null ? '—' : `${Math.round(Number(n)).toLocaleString()} ${settings.distance_unit}`;
 
   return (
-    <Ctx.Provider value={{ user, ready, login, logout, can, settings, setSettings, loadSettings, notify, toast, money, dist }}>
+    <Ctx.Provider value={{ user, ready, login, logout, can, settings, setSettings: applySettings, branding: user ? { company_name: settings.company_name, logo: settings.logo || null } : branding, loadSettings, notify, toast, money, dist }}>
       {children}
     </Ctx.Provider>
   );
