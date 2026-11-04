@@ -4,14 +4,14 @@ import { useApp } from '../context';
 import { Modal, fmtDate } from '../ui';
 import { REASONS, excusedByDefault, reasonLabel } from '../reasons';
 
-import { DAY, buildStatement, dow, dueThroughNow, monthName } from '../statement.js';
+import { DAY, buildStatement, dow, monthName } from '../statement.js';
 
 export { buildStatement };
 
 const STATUS = {
   paid: ['Paid', 'tone-ok'], part: ['Part paid', 'tone-warn'], unpaid: ['Not paid', 'tone-bad'],
   excused: ['Excused', 'tone-muted'], not_due: ['Not due yet', 'tone-muted'],
-  due_tonight: ['Due by 9pm today', 'tone-muted'], part_tonight: ['Part paid · rest due by 9pm', 'tone-warn'], off_owed: ['Day off – still owed', 'tone-warn'],
+off_owed: ['Day off – still owed', 'tone-warn'],
 };
 
 export default function DailyStatement({ contract, driverName, reloadKey, onChanged }) {
@@ -31,7 +31,7 @@ export default function DailyStatement({ contract, driverName, reloadKey, onChan
 
   const changed = () => { setVersion(v => v + 1); onChanged?.(); };
   const today = new Date().toISOString().slice(0, 10);
-  const st = useMemo(() => (payments ? buildStatement(contract, payments, today, offDays, dueThroughNow()) : null), [payments, offDays, contract, today]);
+  const st = useMemo(() => (payments ? buildStatement(contract, payments, today, offDays) : null), [payments, offDays, contract, today]);
   const months = useMemo(() => {
     if (!st) return [];
     const by = {};

@@ -2,7 +2,7 @@
 // company's AT_CSR_<MONTH> workbook: a <MONTH> sheet, a SUMMARY sheet and a DEFAULT DETAIL sheet,
 // with the same formulas so the file keeps working when it is edited in Excel.
 
-import { buildStatement, dueThroughNow } from './statement.js';
+import { buildStatement } from './statement.js';
 import { DEPARTMENTS, REASONS, reasonInfo } from './reasons.js';
 
 const MONEY = { daily: 1, adjustment: 1 };
@@ -27,9 +27,8 @@ export function csrData({ contracts, payments, offDays, month, today }) {
     .sort((a, b) => String(a.driver_name || '').localeCompare(String(b.driver_name || '')) || a.id - b.id)
     .forEach(c => {
       const pays = payBy[c.id] || [], offs = offBy[c.id] || [];
-      const st = buildStatement(c, pays, today, offs, dueThroughNow());
-      // Yesterday's work isn't counted until its 9pm deadline has passed (unless it's already paid).
-      const days = st.days.filter(d => d.pay && !d.future && d.date >= from && d.date <= to && d.status !== 'due_tonight');
+      const st = buildStatement(c, pays, today, offs);
+      const days = st.days.filter(d => d.pay && !d.future && d.date >= from && d.date <= to);
       const name = String(c.driver_name || '').toUpperCase();
       const reg = String(c.reg_number || '').toUpperCase();
       const batch = c.batch || (c.type === 'daily_hire' ? 'EV' : '');
@@ -37,7 +36,7 @@ export function csrData({ contracts, payments, offDays, month, today }) {
       let worked = 0;
       days.forEach(d => {
         // Worked: money came in for the day (part payments too – the shortfall shows in the revenue columns).
-        if (!d.off && (d.status === 'paid' || d.status === 'part' || d.status === 'part_tonight')) { worked++; return; }
+        if (!d.off && (d.status === 'paid' || d.status === 'part')) { worked++; return; }
         if (d.off) {
           const r = reasonInfo(d.off.reason);
           defaults.push({ date: d.date, name, reg, batch, carType, dept: r.dept, reason: r.report, remarks: d.off.note || '' });

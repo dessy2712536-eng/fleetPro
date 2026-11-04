@@ -4,9 +4,6 @@ const assert = require('node:assert/strict');
 const { loadBackend } = require('./emulator');
 
 const { ctx, book, call } = loadBackend();
-// Pretend it's after 9pm, so yesterday's work already counts as owed (the 9pm rule has its own test).
-const setHour = h => require('vm').runInContext(`nowHour = () => ${h};`, ctx);
-setHour(22);
 // Forget which tabs were checked, as a fresh Apps Script run would.
 const freshRun = () => require('vm').runInContext('Object.keys(_checked).forEach(k => delete _checked[k]);', ctx);
 ctx.setup();
@@ -328,24 +325,6 @@ test('drivers can start without paying the security deposit; it shows as owed', 
   assert.ok(ok(as(admin, 'GET', '/alerts')).alerts.some(a => a.kind === 'deposit_owed' && a.driver_id === d.id));
   ok(as(admin, 'PUT', `/contracts/${c.id}`, { body: { deposit_amount: 15000, deposit_reference: 'ND-DEP' } }));
   assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).deposit_owed, 0);
-});
-
-test('a day becomes debt at 9pm the day after the work', () => {
-  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'NINE-1', make: 'Livan', model: 'X3 Pro', type: 'car', fuel_type: 'petrol', status: 'active' } }));
-  const d = ok(as(admin, 'POST', '/drivers', { body: { name: 'Nine PM', status: 'active', manager_id: 1 } }));
-  const start = ctx.addDays(ctx.today(), -2);
-  const c = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d.id, vehicle_id: car.id, type: 'work_and_pay', start_date: start, status: 'active', deposit_amount: 15000, deposit_reference: 'NINE-D' } }));
-  const payDaysIn = to => [start, ctx.addDays(start, 1)].filter(x => x <= to && new Date(x + 'T00:00:00Z').getUTCDay() !== 0).length;
-  setHour(20);
-  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).arrears, 400 * payDaysIn(start), 'before 9pm, yesterday is not owed yet');
-  const y = ctx.addDays(start, 1);
-  if (new Date(y + 'T00:00:00Z').getUTCDay() !== 0) {
-    ok(as(admin, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: y, paid_on: ctx.today(), amount: 400, momo_reference: 'NINE-P1' } }));
-    assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).arrears, 400 * payDaysIn(start), 'paying early does not put the driver ahead');
-  }
-  setHour(21);
-  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).arrears, 400 * payDaysIn(ctx.addDays(start, 1)) - (new Date(y + 'T00:00:00Z').getUTCDay() !== 0 ? 400 : 0), 'from 9pm, yesterday is a debt');
-  setHour(22);
 });
 
 test('CASH can be used as the reference more than once', () => {

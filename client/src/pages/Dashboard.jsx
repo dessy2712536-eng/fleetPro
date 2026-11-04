@@ -49,7 +49,7 @@ export default function Dashboard() {
         <div className="kpi">
           <span className="kpi-label">Paid for yesterday's work</span>
           <span className="kpi-value">{money(y.collected)}</span>
-          <span className="kpi-note">of {money(y.expected)} due{yRate != null && <> · <span className={yRate >= 95 ? 'txt-ok' : 'txt-bad'}>{yRate}%</span></>} · {y.unpaid.length} not paid yet{y.is_debt === false ? ' · deadline 9pm today' : ''}</span>
+          <span className="kpi-note">of {money(y.expected)} due{yRate != null && <> · <span className={yRate >= 95 ? 'txt-ok' : 'txt-bad'}>{yRate}%</span></>} · {y.unpaid.length} not paid yet</span>
         </div>
         <div className="kpi">
           <span className="kpi-label">Received today</span>
@@ -86,7 +86,6 @@ export default function Dashboard() {
 
         <section className="panel">
           <header className="panel-head"><h2>Not paid for {fmtDate(y.date)}</h2><Link to="/payments">Record payment</Link></header>
-          {y.unpaid.length > 0 && <p className="dim small" style={{ margin: '0 0 8px' }}>{y.is_debt === false ? 'Due by 9pm today. Anything not paid by then becomes a debt.' : 'Past the 9pm deadline – now counted as debt.'}</p>}
           {y.unpaid.length === 0 ? <p className="empty">Everyone has paid for yesterday.</p> : (
             <ul className="plain-list">
               {y.unpaid.map(u => (

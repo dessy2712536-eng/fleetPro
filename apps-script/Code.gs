@@ -556,15 +556,8 @@ const maxDate = function () { return Array.prototype.slice.call(arguments).filte
 /** Last day a contract is (or was) payable. */
 function contractLastDay(c) { return minDate(c.ended_on, c.end_date) || null; }
 
-/**
- * Work days whose money counts as owed (debt) by now. A day's money is due the day after the work, by 9pm.
- * Before 9pm, yesterday's work isn't a debt yet; from 9pm it is.
- */
-const DEBT_HOUR = 21;
-/** When a work day's money becomes a debt, e.g. "Tue 4 Nov, 9pm". */
-function debtFrom(workDate) { const d = addDays(workDate, 1); return { date: d, hour: DEBT_HOUR }; }
-function nowHour() { return Number(Utilities.formatDate(new Date(), tz(), 'HH')); }
-function dueThrough() { return addDays(today(), nowHour() >= DEBT_HOUR ? -1 : -2); }
+/** Work days whose payment is due by now: a day's money is due the following day, so up to yesterday. */
+function dueThrough() { return addDays(today(), -1); }
 
 const MONEY_TYPES = { daily: 1, adjustment: 1 };
 
@@ -586,16 +579,7 @@ function contractStats(c, payments) {
   const waived = round(sum(payments.filter(p => p.type === 'waiver'), p => p.amount) + offs.filter(o => o.excused).length * (c.daily_rate || 0));
   const rate = c.daily_rate || 0;
   const dueDays = payDays(c.start_date, minDate(dueThrough(), contractLastDay(c)), c.payment_days);
-  // Yesterday before 9pm isn't a debt yet: only what has already been paid for it counts as due,
-  // so an early payment doesn't make the driver look ahead.
-  let pendingDue = 0;
-  for (let d = addDays(dueThrough(), 1); d <= addDays(today(), -1); d = addDays(d, 1)) {
-    const last = contractLastDay(c);
-    if (d < c.start_date || (last && d > last) || !isPayDay(d, c.payment_days)) continue;
-    if (offDaysFor(c.id).some(o => o.excused && o.date === d)) continue;
-    pendingDue += Math.min(rate, sum(payments.filter(p => p.type === 'daily' && p.work_date === d), p => p.amount));
-  }
-  const expected = round(dueDays * rate + pendingDue);
+  const expected = round(dueDays * rate);
   const arrears = round(expected - paid - waived);
   // Price to own the car: set on the contract, else the model's price (Settings → Car prices), else daily rate × every pay day in the term.
   const total = c.type !== 'work_and_pay' ? null
@@ -1434,7 +1418,7 @@ function managerReport(q, user) {
 /** Expected vs collected for each of the last N days (by work date). */
 function dailyCollections(days, managerId) {
   const m = maps();
-  const end = addDays(today(), -1); // yesterday's work shows even before its 9pm deadline
+  const end = dueThrough();
   const out = [];
   const contracts = readAll('contracts').filter(c => !managerId || inGroup('contracts', c, managerId, m));
   for (let i = days - 1; i >= 0; i--) {
@@ -1465,7 +1449,7 @@ function collectionsSummary(managerId) {
     }));
   return {
     collected_today: round(sum(payments.filter(p => p.paid_on === now), p => p.amount)),
-    yesterday: { date: yesterday, expected: yday.expected, collected: yday.collected, unpaid, debt_from: debtFrom(yesterday), is_debt: dueThrough() >= yesterday },
+    yesterday: { date: yesterday, expected: yday.expected, collected: yday.collected, unpaid },
     month_collected: round(sum(payments.filter(p => p.paid_on >= now.slice(0, 8) + '01'), p => p.amount)),
     arrears_total: round(sum(stats.filter(x => x.arrears > 0), x => x.arrears)),
     drivers_in_arrears: stats.filter(x => x.days_behind >= 1).length,
