@@ -229,7 +229,7 @@ export function DriverDetail() {
             {can('manager') && <button className="btn primary sm" onClick={() => setQuick('car')}>Set up contract</button>}
           </div>
         ) : (
-          <div className="notes">{d.name.split(' ')[0]} doesn't have a car yet.{can('manager') && d.status !== 'stopped' && <> <button className="link-btn" onClick={() => setQuick('car')}>Assign a car</button></>}</div>
+          <div className="notes">{d.name.split(' ')[0]} doesn't have a car yet{d.arrangement ? ` (${human(d.arrangement).toLowerCase()})` : ''}.{can('manager') && d.status !== 'stopped' && <> <button className="link-btn" onClick={() => setQuick('car')}>Assign a car</button></>}</div>
         )
       )}
       {d.notes && <p className="notes">{d.notes}</p>}
@@ -250,8 +250,8 @@ export function DriverDetail() {
       {quick === 'car' && (
         <Modal title={looseCar ? `Set up contract · ${d.name}` : `Assign a car to ${d.name}`} onClose={() => setQuick(null)} wide>
           <RecordForm
-            fields={carFields({ withHeading: false }).map(f => f.name === 'car_id' ? { ...f, allowDriverId: d.id, required: true, hint: d.manager_name ? `Cars in ${d.manager_name}'s group can be given to ${d.name.split(' ')[0]}` : undefined } : f)}
-            initial={{ ...carDefaults(), ...(looseCar ? { car_id: looseCar.id, c_type: /cerio|cireo|byd/i.test(looseCar.make) ? 'daily_hire' : 'work_and_pay' } : {}) }}
+            fields={carFields({ withHeading: false }).map(f => f.name === 'car_id' ? { ...f, ...(d.arrangement ? { derive: () => ({}) } : {}), allowDriverId: d.id, required: true, hint: d.manager_name ? `Cars in ${d.manager_name}'s group can be given to ${d.name.split(' ')[0]}` : undefined } : f)}
+            initial={{ ...carDefaults(), ...(d.arrangement ? { c_type: d.arrangement } : {}), ...(looseCar ? { car_id: looseCar.id, c_type: d.arrangement || (/cerio|cireo|byd/i.test(looseCar.make) ? 'daily_hire' : 'work_and_pay') } : {}) }}
             onSubmit={async f => {
               if (!f.car_id) { const e = new Error('Choose a car'); e.details = { car_id: 'Required' }; throw e; }
               const c = await giveCar(d.id, f);

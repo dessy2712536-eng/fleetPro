@@ -232,6 +232,16 @@ test('a car marked with a driver (no contract) still shows on the driver', () =>
   assert.equal(ok(as(admin, 'GET', `/vehicles/${car.id}`)).has_contract, true);
 });
 
+test('drivers keep their work arrangement', () => {
+  const d = ok(as(admin, 'POST', '/drivers', { body: { name: 'Arr Driver', status: 'active', arrangement: 'daily_hire' } }));
+  assert.equal(d.arrangement, 'daily_hire');
+  assert.equal(as(admin, 'POST', '/drivers', { body: { name: 'Bad Arr', status: 'active', arrangement: 'rent' } }).status, 422);
+  assert.ok(ok(as(admin, 'GET', '/drivers', { query: { arrangement: 'daily_hire', limit: 500 } })).rows.some(x => x.id === d.id));
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'AR-1', make: 'Toyota', model: 'Vitz', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  ok(as(admin, 'POST', '/contracts', { body: { driver_id: d.id, vehicle_id: car.id, type: 'work_and_pay', start_date: ctx.today(), status: 'active', deposit_amount: 15000, deposit_reference: 'ARR-DEP-1' } }));
+  assert.equal(ok(as(admin, 'GET', `/drivers/${d.id}`)).arrangement, 'work_and_pay', 'the contract decides once there is one');
+});
+
 test('payDays counts Monday–Saturday', () => {
   assert.equal(ctx.payDays('2026-11-02', '2026-11-08', 'mon_sat'), 6); // Mon..Sun
   assert.equal(ctx.payDays('2026-11-08', '2026-11-08', 'mon_sat'), 0); // Sunday

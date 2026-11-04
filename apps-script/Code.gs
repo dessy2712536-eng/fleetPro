@@ -42,6 +42,7 @@ const FIELDS = {
     license_expiry: { type: 'date' },
     hire_date: { type: 'date' },
     status: { type: 'enum', values: ['active', 'on_leave', 'stopped'], required: true },
+    arrangement: { type: 'enum', values: ['work_and_pay', 'daily_hire'] },
     notes: { type: 'string', max: 2000 },
   },
   vehicles: {
@@ -656,7 +657,7 @@ const RESOURCES = {
         .forEach(c => updateWhere('vehicles', v => v.id === c.vehicle_id && v.manager_id !== row.manager_id, { manager_id: row.manager_id }));
     },
     search: ['name', 'phone', 'momo_number', 'id_number', 'email', 'license_number', 'reg_number', 'manager_name'],
-    filters: { status: 'status', manager_id: 'manager_id', intention: 'intention' },
+    filters: { status: 'status', manager_id: 'manager_id', intention: 'intention', arrangement: 'arrangement' },
     sortable: ['name', 'license_expiry', 'status', 'arrears', 'manager_name'],
     defaultSort: ['name', 'asc'],
     describe: r => r.name,
@@ -821,7 +822,7 @@ Object.assign(RESOURCES, {
           updateRow('vehicles', v.id, { assigned_driver_id: row.driver_id, status: v.status === 'inactive' ? 'active' : v.status });
         }
         const drv = findById('drivers', row.driver_id);
-        if (drv && drv.status !== 'active') updateRow('drivers', drv.id, { status: 'active' });
+        if (drv && (drv.status !== 'active' || drv.arrangement !== row.type)) updateRow('drivers', drv.id, { status: 'active', arrangement: row.type });
       } else if (!prev || prev.status === 'active') {
         if (v && v.assigned_driver_id === row.driver_id) {
           updateRow('vehicles', v.id, { assigned_driver_id: null, status: row.status === 'completed' && row.type === 'work_and_pay' ? 'handed_over' : v.status });

@@ -96,6 +96,7 @@ export function parseDriverRows(input) {
       manager_text: get('manager'),
       car: car.toUpperCase().replace(/\s+/g, ' '),
       type: !car ? null : /daily|hire/.test(arr) ? 'daily_hire' : 'work_and_pay',
+      arrangement: /daily|hire/.test(arr) ? 'daily_hire' : /work|pay|w&p/.test(arr) ? 'work_and_pay' : (car ? 'work_and_pay' : null),
       start_date: date('start_date', 'Start date'),
       daily_rate: money(raw('daily_rate')),
       deposit_amount: money(raw('deposit_amount')),
@@ -214,7 +215,7 @@ export default function ImportDrivers({ onClose, onDone }) {
         let driverId = r.existing && r.existing.id;
         if (!driverId) {
           const d = await api('/drivers', { method: 'POST', body: {
-            name: r.name, phone: r.phone || null, momo_number: r.momo_number || null, id_number: r.id_number,
+            name: r.name, phone: r.phone || null, momo_number: r.momo_number || null, id_number: r.id_number, arrangement: r.arrangement,
             license_number: r.license_number, license_expiry: r.license_expiry, manager_id: r.manager_id, status: 'active',
             hire_date: r.start_date, notes: r.notes,
           } });

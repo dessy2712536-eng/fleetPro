@@ -103,7 +103,7 @@ export async function giveCar(driverId, f) {
   return contract;
 }
 
-const DRIVER_KEYS = ['name', 'status', 'manager_id', 'phone', 'momo_number', 'id_number', 'license_number', 'license_class', 'license_expiry', 'hire_date', 'email', 'notes'];
+const DRIVER_KEYS = ['name', 'status', 'arrangement', 'manager_id', 'phone', 'momo_number', 'id_number', 'license_number', 'license_class', 'license_expiry', 'hire_date', 'email', 'notes'];
 
 export const driversCfg = ({ money, user } = {}) => ({
   endpoint: '/drivers', singular: 'Driver', exportName: 'drivers',
@@ -114,11 +114,12 @@ export const driversCfg = ({ money, user } = {}) => ({
     { name: 'manager_id', label: 'Manager', ref: 'manager' },
     { name: 'status', label: 'Status', options: ['active', 'on_leave', 'stopped'] },
     { name: 'intention', label: 'Latest feedback', options: ['continue', 'undecided', 'wants_to_stop'] },
+    { name: 'arrangement', label: 'Arrangement', options: ['work_and_pay', 'daily_hire'] },
   ],
   columns: [
     { key: 'name', label: 'Driver', sort: 'name', render: r => <><Link to={`/drivers/${r.id}`} className="strong-link">{r.name}</Link><div className="dim">{r.phone || ''}</div></> },
     { key: 'manager_name', label: 'Manager', sort: 'manager_name', hideIn: 'manager_id', render: r => r.manager_name || <span className="dim">None</span> },
-    { key: 'reg_number', label: 'Car', render: r => !r.reg_number ? <span className="dim">No car</span> : r.car_without_contract
+    { key: 'reg_number', label: 'Car', render: r => !r.reg_number ? <><span className="dim">No car</span>{r.arrangement && <div className="dim">{human(r.arrangement)}</div>}</> : r.car_without_contract
         ? <><Plate to={`/vehicles/${r.vehicle_id}`}>{r.reg_number}</Plate><div className="txt-warn small">No contract yet</div></>
         : <><Plate to={`/vehicles/${r.vehicle_id}`}>{r.reg_number}</Plate><div className="dim">{human(r.contract_type)} · {money ? money(r.daily_rate) : r.daily_rate}/day</div></> },
     { key: 'arrears', label: 'Owing', num: true, sort: 'arrears', render: r => r.arrears == null ? <span className="dim">—</span> : <Owing r={r} money={money} /> },
@@ -127,7 +128,7 @@ export const driversCfg = ({ money, user } = {}) => ({
     { key: 'license_expiry', label: 'Licence', sort: 'license_expiry', render: r => <ExpiryCell date={r.license_expiry} /> },
     { key: 'status', label: 'Status', sort: 'status', render: r => <Badge value={r.status} /> },
   ],
-  defaults: () => ({ status: 'active', __new: true, ...carDefaults(), ...(user && user.role === 'manager' ? { manager_id: user.id } : {}) }),
+  defaults: () => ({ status: 'active', arrangement: 'work_and_pay', __new: true, ...carDefaults(), ...(user && user.role === 'manager' ? { manager_id: user.id } : {}) }),
   // A new driver can be given a car in the same step. If the car can't be given, the driver isn't kept,
   // so pressing Save again never creates the same driver twice.
   save: async (form, editing) => {
@@ -137,7 +138,9 @@ export const driversCfg = ({ money, user } = {}) => ({
       throw new ApiError(422, 'Please fix the highlighted fields', { id_number: 'Use the format GHA-123456789-0 (10 digits)' });
     }
     if (editing && editing.id) { await api(`/drivers/${editing.id}`, { method: 'PUT', body }); return 'Driver updated'; }
+    if (!body.arrangement && !form.contract_id) throw new ApiError(422, 'Please fix the highlighted fields', { arrangement: 'Choose work & pay or daily hire' });
     if (form.car_id && !body.hire_date) body.hire_date = form.c_start_date;
+    if (form.car_id) form = { ...form, c_type: body.arrangement };
     const driver = await api('/drivers', { method: 'POST', body });
     if (!form.car_id) return 'Driver added';
     try {
@@ -151,10 +154,23 @@ export const driversCfg = ({ money, user } = {}) => ({
   fields: [
     { name: 'name', label: 'Full name', required: true },
     { name: 'status', label: 'Status', type: 'select', options: ['active', 'on_leave', 'stopped'], required: true },
+    { name: 'contract_id', type: 'hidden' },
+    { name: 'arrangement', label: 'Work & pay or daily hire?', type: 'select', options: ['work_and_pay', 'daily_hire'], required: true, span: 2,
+      showIf: form => !form.contract_id,
+      hint: form => form.arrangement === 'daily_hire'
+        ? 'Daily hire: the driver pays a daily amount for the car (e.g. Cerio 500, BYD 700) and never owns it. No deposit needed.'
+        : 'Work & pay: the driver pays 400 a day, Monday to Saturday, for 4 years, then owns the car. Needs a security deposit.',
+      derive: v => ({ c_type: v }) },
     { name: 'manager_id', label: 'Manager', type: 'manager', hint: 'The manager this driver reports to' },
     { name: 'phone', label: 'Phone' },
     { name: 'momo_number', label: 'MTN MoMo number', hint: 'Number the driver pays from' },
-    ...carFields().map(f => ({ ...f, showIf: form => !!form.__new && (!f.showIf || f.showIf(form)) })),
+    ...carFields()
+      .filter(f => f.name !== 'c_type') // the arrangement question above decides this
+      .map(f => ({
+        ...f,
+        ...(f.name === 'car_id' ? { derive: v => { const car = cachedOption('vehicle', v); return car && car.manager_id ? { manager_id: car.manager_id } : {}; } } : {}),
+        showIf: form => !!form.__new && (!f.showIf || f.showIf(form)),
+      })),
     { name: 'details_heading', type: 'heading', label: 'Licence and other details', showIf: form => !!form.__new },
     { name: 'id_number', label: 'Ghana Card number', type: 'ghanacard', hint: 'Format GHA-XXXXXXXXX-X. Type the 10 digits; the rest is added for you' },
     { name: 'license_number', label: 'Licence number' },

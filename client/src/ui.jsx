@@ -149,6 +149,8 @@ export function Field({ f, value, onChange, error, form }) {
           value={value ?? ''} onChange={e => onChange(formatGhanaCardTyping(e.target.value))} />
       );
       break;
+    case 'hidden':
+      return null;
     case 'heading':
       return <div className="form-heading span-2"><h3>{f.label}</h3>{f.hint && <small className="hint">{f.hint}</small>}</div>;
     case 'textarea':
