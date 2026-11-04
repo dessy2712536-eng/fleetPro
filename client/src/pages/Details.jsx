@@ -243,7 +243,8 @@ export function DriverDetail() {
           <RecordForm
             fields={(quick === 'payment' ? payCfg : ciCfg).fields.filter(f => f.name !== (quick === 'payment' ? 'contract_id' : 'driver_id'))}
             initial={quick === 'payment'
-              ? { ...payCfg.defaults(), contract_id: contract.id, amount: contract.daily_rate, momo_number: d.momo_number, work_date: contract.next_unpaid_day }
+              ? { ...payCfg.defaults(), contract_id: contract.id, c_rate: contract.daily_rate, c_type: contract.type,
+                  amount: contract.type === 'daily_hire' ? null : contract.daily_rate, momo_number: d.momo_number, work_date: contract.next_unpaid_day }
               : { ...ciCfg.defaults(), driver_id: d.id }}
             onSubmit={f => quickSave(quick === 'payment' ? { ...f, contract_id: contract.id } : { ...f, driver_id: d.id })}
             onCancel={() => setQuick(null)}

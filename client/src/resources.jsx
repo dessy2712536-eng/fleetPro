@@ -210,6 +210,18 @@ export const contractsCfg = ({ money, user }) => ({
   ],
 });
 
+/** Explains how the amount typed compares with the driver's usual daily payment. */
+function amountHint(f, money) {
+  const rate = Number(f.c_rate), amt = Number(f.amount);
+  if (f.type && f.type !== 'daily') return f.type === 'waiver' ? 'The amount being excused for those days' : 'Any correction, e.g. an opening balance';
+  if (!rate) return 'Type the amount the driver paid';
+  const usual = `${f.c_type === 'daily_hire' ? 'Usual daily payment' : 'Daily payment'}: ${money(rate)}`;
+  if (!f.amount && f.amount !== 0) return `Type the amount the driver paid. ${usual}`;
+  if (amt < rate) return `${money(rate - amt)} less than the usual ${money(rate)}. The difference stays as owing`;
+  if (amt > rate) return `${money(amt - rate)} more than ${money(rate)}. Counts towards what's owing, or as paid ahead`;
+  return `${usual}. Fully paid`;
+}
+
 export const paymentsCfg = ({ money, user }) => ({
   endpoint: '/payments', singular: 'Payment', exportName: 'payments', dateRange: true,
   searchPlaceholder: 'Search MoMo reference, driver, car',
@@ -231,9 +243,18 @@ export const paymentsCfg = ({ money, user }) => ({
   defaults: () => ({ type: 'daily', paid_on: todayStr(), work_date: daysAgo(1) }),
   fields: [
     { name: 'contract_id', label: 'Driver and car', type: 'contract', required: true, span: 2,
-      derive: (v, form) => { const o = cachedOption('contract', v); return o ? { ...(form.amount ? {} : { amount: o.daily_rate }), ...(o.next_unpaid_day ? { work_date: o.next_unpaid_day } : {}) } : {}; } },
+      // Work & pay is a fixed 400, so it's filled in. Daily hire drivers pay what they made, so the amount is left for the manager to type.
+      derive: (v, form) => {
+        const o = cachedOption('contract', v);
+        if (!o) return {};
+        return {
+          c_rate: o.daily_rate, c_type: o.type,
+          ...(o.type === 'daily_hire' ? { amount: form.c_type === 'daily_hire' ? form.amount : null } : (form.amount ? {} : { amount: o.daily_rate })),
+          ...(o.next_unpaid_day ? { work_date: o.next_unpaid_day } : {}),
+        };
+      } },
     { name: 'type', label: 'Type', type: 'select', options: ['daily', 'waiver', 'adjustment'], required: true, hint: 'Excused days: car off the road, holiday – no money received' },
-    { name: 'amount', label: 'Amount', type: 'number', required: true },
+    { name: 'amount', label: 'Amount paid', type: 'number', required: true, hint: f => amountHint(f, money) },
     { name: 'work_date', label: 'For work done on', type: 'date', required: true, hint: 'Filled in with the next unpaid day. For excused days, the first day off' },
     { name: 'paid_on', label: 'Paid on', type: 'date', required: true },
     { name: 'momo_reference', label: 'MTN MoMo reference', showIf: f => f.type !== 'waiver', hint: 'Transaction ID from the MoMo message' },

@@ -855,8 +855,10 @@ Object.assign(RESOURCES, {
       if (c && d.work_date && d.work_date < c.start_date) throw invalid('work_date', `Contract starts on ${c.start_date}`);
       if (c && d.type === 'daily') {
         const already = sum(readAll('payments').filter(p => p.contract_id === c.id && p.work_date === d.work_date && p.type === 'daily' && p.id !== (prev ? prev.id : -1)), p => p.amount);
-        if (already > 0 && already + d.amount > c.daily_rate) {
-          throw invalid('work_date', `Already paid ${already} for this day. Choose the next unpaid day (${contractStats(c, readAll('payments').filter(p => p.contract_id === c.id)).next_unpaid_day}).`);
+        // Part-payments for the same day are fine (e.g. 300 now, 200 later). Only a day that is
+        // already fully paid is refused, so the same payment can't be entered twice by mistake.
+        if (already >= c.daily_rate) {
+          throw invalid('work_date', `This day is already fully paid (${already}). Choose the next unpaid day (${contractStats(c, readAll('payments').filter(p => p.contract_id === c.id)).next_unpaid_day}).`);
         }
       }
     },

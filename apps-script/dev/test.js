@@ -145,7 +145,7 @@ test('work & pay contract: deposit rules, arrears, MoMo references, handover', (
   assert.equal(as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: start, paid_on: start, amount: 400, momo_reference: 'mp123' } }).status, 422);
   assert.equal(as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: start, paid_on: start, amount: 400, momo_reference: 'dep001' } }).status, 422);
   const twice = as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: start, paid_on: addDays(start, 1), amount: 400, momo_reference: 'MP124' } });
-  assert.equal(twice.status, 422); assert.match(twice.details.work_date, /Already paid/);
+  assert.equal(twice.status, 422); assert.match(twice.details.work_date, /already fully paid/);
   assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).next_unpaid_day > start, true);
   assert.equal(as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'waiver', work_date: start, paid_on: start, amount: 800 } }).status, 422);
   ok(as(mtok, 'POST', '/payments', { body: { contract_id: c.id, type: 'waiver', work_date: addDays(start, 1), paid_on: addDays(start, 2), amount: 800, notes: 'Car in workshop' } }));
@@ -206,6 +206,18 @@ test('daily hire rates for Cerio and BYD, no deposit needed', () => {
   const b = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d2.id, vehicle_id: byd.id, type: 'daily_hire', start_date: ctx.today(), status: 'active' } }));
   assert.equal(a.daily_rate, 500); assert.equal(b.daily_rate, 700);
   assert.equal(a.end_date, null); assert.equal(a.contract_value, null);
+});
+
+test('daily hire: any amount can be entered, and part-payments add up', () => {
+  const d = ok(as(admin, 'POST', '/drivers', { body: { name: 'Part Payer', status: 'active' } }));
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'PP-1', make: 'BYD', model: 'Dolphin', type: 'car', fuel_type: 'electric', status: 'active' } }));
+  const day = ctx.addDays(ctx.today(), -1);
+  const c = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d.id, vehicle_id: car.id, type: 'daily_hire', start_date: day, status: 'active' } }));
+  ok(as(admin, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: day, paid_on: ctx.today(), amount: 300, momo_reference: 'PP-A' } }));
+  ok(as(admin, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: day, paid_on: ctx.today(), amount: 250, momo_reference: 'PP-B' } }));
+  const after = ok(as(admin, 'GET', `/contracts/${c.id}`));
+  assert.equal(after.paid_total, 550);
+  assert.equal(after.arrears, ctx.isPayDay(day, 'mon_sat') ? 150 : -550);
 });
 
 test('payDays counts Monday–Saturday', () => {

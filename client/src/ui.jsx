@@ -173,7 +173,7 @@ export function Field({ f, value, onChange, error, form }) {
     <div className={`field ${f.span === 2 || f.type === 'textarea' ? 'span-2' : ''}`}>
       <label htmlFor={id}>{f.label}{f.required && <span className="req" aria-hidden> *</span>}</label>
       {input}
-      {f.hint && !error && <small className="hint">{f.hint}</small>}
+      {f.hint && !error && <small className="hint">{typeof f.hint === 'function' ? f.hint(form || {}) : f.hint}</small>}
       {error && <small className="err">{error}</small>}
     </div>
   );
