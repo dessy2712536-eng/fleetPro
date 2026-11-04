@@ -1722,12 +1722,7 @@ function route(method, path, q, body, token) {
   if (path === '/admin/reset' && method === 'POST') {
     requireRole(user, 'admin');
     if (String((body && body.confirm) || '') !== 'DELETE') throw invalid('confirm', 'Type DELETE to confirm');
-    const wipe = ['payments', 'off_days', 'contracts', 'checkins', 'trips', 'fuel_logs', 'expenses', 'maintenance_records', 'maintenance_schedules', 'vehicles', 'drivers', 'audit_log'];
-    const counts = {};
-    wipe.forEach(t => { if (FIELDS[t]) { counts[t] = readAll(t).length; writeAll(t, []); } });
-    const before = readAll('users');
-    writeAll('users', before.filter(u => u.role === 'admin'));
-    counts.users = before.length - readAll('users').length;
+    const counts = wipeAllData();
     audit(user, 'delete', 'All data', null, `Started again: ${counts.vehicles || 0} cars, ${counts.drivers || 0} drivers, ${counts.payments || 0} payments, ${counts.users} users removed`);
     return { ok: true, removed: counts };
   }
@@ -1837,6 +1832,29 @@ function setup() {
     console.log('Created admin account: admin@fleet.local / admin12345 — change the password after signing in.');
   }
   console.log('Setup complete. Now deploy: Deploy → New deployment → Web app.');
+}
+
+/** Deletes every car, driver and record, and all non-admin users. Admin accounts and Settings are kept. */
+function wipeAllData() {
+  const wipe = ['payments', 'off_days', 'contracts', 'checkins', 'trips', 'fuel_logs', 'expenses', 'maintenance_records', 'maintenance_schedules', 'vehicles', 'drivers', 'audit_log'];
+  const counts = {};
+  wipe.forEach(t => { if (FIELDS[t] && ss().getSheetByName(t)) { counts[t] = readAll(t).length; writeAll(t, []); } });
+  const before = readAll('users');
+  writeAll('users', before.filter(u => u.role === 'admin'));
+  counts.users = before.length - readAll('users').length;
+  return counts;
+}
+
+/**
+ * START AGAIN — run this from the Apps Script editor (choose "startAgain" next to Debug, then Run).
+ * Permanently deletes all cars, drivers, contracts, payments, days off, check-ins, maintenance,
+ * expenses, the activity log and every manager account. Admin accounts and Settings are kept.
+ * Make a backup first: in the Google Sheet, File → Make a copy.
+ */
+function startAgain() {
+  Object.keys(_cache).forEach(k => delete _cache[k]);
+  const c = wipeAllData();
+  console.log(`Done. Removed ${c.vehicles || 0} cars, ${c.drivers || 0} drivers, ${c.contracts || 0} contracts, ${c.payments || 0} payments and ${c.users} manager/viewer accounts. Admin accounts and Settings were kept.`);
 }
 
 /** Wipes vehicles, drivers and all records, then loads a demo work-and-pay fleet. */

@@ -392,6 +392,17 @@ test('a missing tab (from a newer version) is created automatically', () => {
   assert.ok(b3.book.getSheetByName('off_days'));
 });
 
+test('startAgain() run from the editor clears everything but admins', () => {
+  const { loadBackend } = require('./emulator');
+  const b4 = loadBackend(); b4.ctx.setup(); b4.ctx.loadDemoData();
+  b4.ctx.startAgain();
+  const t4 = b4.call('POST', '/auth/login', { body: { email: 'admin@fleet.local', password: 'admin12345' } }).data.token;
+  assert.equal(b4.call('GET', '/vehicles', { token: t4 }).data.total, 0);
+  assert.equal(b4.call('GET', '/drivers', { token: t4 }).data.total, 0);
+  assert.equal(b4.call('GET', '/payments', { token: t4 }).data.total, 0);
+  assert.deepEqual(b4.call('GET', '/users', { token: t4 }).data.rows.map(u => u.role), ['admin']);
+});
+
 test('payDays counts Monday–Saturday', () => {
   assert.equal(ctx.payDays('2026-11-02', '2026-11-08', 'mon_sat'), 6); // Mon..Sun
   assert.equal(ctx.payDays('2026-11-08', '2026-11-08', 'mon_sat'), 0); // Sunday
