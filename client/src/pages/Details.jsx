@@ -223,8 +223,8 @@ export function DriverDetail() {
   const ciCfg = checkinsCfg(app);
 
   const save = async form => {
-    await cfg.save(form, { id: Number(id) });
-    notify('Driver updated'); setEditing(false); invalidateOptions(); refresh();
+    const message = await cfg.save(form, { id: Number(id) });
+    notify(message || 'Driver updated'); setEditing(false); invalidateOptions(); refresh();
   };
   const remove = async () => {
     if (!window.confirm(`Delete ${d.name}?`)) return;
@@ -297,7 +297,7 @@ export function DriverDetail() {
 
       {editing && (
         <Modal title={`Edit ${d.name}`} onClose={() => setEditing(false)} wide>
-          <RecordForm fields={cfg.fields} initial={Object.fromEntries(cfg.fields.map(f => [f.name, d[f.name]]))} onSubmit={save} onCancel={() => setEditing(false)} submitLabel="Save changes" />
+          <RecordForm fields={cfg.fields} initial={{ ...Object.fromEntries(cfg.fields.map(f => [f.name, d[f.name]])), ...cfg.editExtras(d) }} onSubmit={save} onCancel={() => setEditing(false)} submitLabel="Save changes" />
           <div className="danger-zone"><button className="link-btn danger" onClick={remove}>Delete this driver</button></div>
         </Modal>
       )}

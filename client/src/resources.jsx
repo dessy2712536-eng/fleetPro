@@ -141,6 +141,13 @@ export const driversCfg = ({ money, user } = {}) => ({
     { key: 'status', label: 'Status', sort: 'status', render: r => <Badge value={r.status} /> },
   ],
   defaults: () => ({ status: 'active', arrangement: 'work_and_pay', __new: true, ...carDefaults(), ...(user && user.role === 'manager' ? { manager_id: user.id } : {}) }),
+  // Extra values the Edit driver form needs: the driver's id, their car, and car defaults for drivers without one.
+  editExtras: row => ({
+    id: row.id, contract_id: row.contract_id || null, reg_number: row.reg_number || null,
+    ...carDefaults(), c_type: row.arrangement || 'work_and_pay',
+    car_id: row.car_without_contract ? row.vehicle_id : null,
+    ...(row.car_without_contract ? { c_onboarding: 'existing_driver', c_start_date: row.hire_date || todayStr() } : {}),
+  }),
   // A new driver can be given a car in the same step. If the car can't be given, the driver isn't kept,
   // so pressing Save again never creates the same driver twice.
   save: async (form, editing) => {
@@ -149,7 +156,15 @@ export const driversCfg = ({ money, user } = {}) => ({
     if (body.id_number && !GHANA_CARD_RE.test(body.id_number)) {
       throw new ApiError(422, 'Please fix the highlighted fields', { id_number: 'Use the format GHA-123456789-0 (10 digits)' });
     }
-    if (editing && editing.id) { await api(`/drivers/${editing.id}`, { method: 'PUT', body }); return 'Driver updated'; }
+    if (editing && editing.id) {
+      await api(`/drivers/${editing.id}`, { method: 'PUT', body });
+      if (!form.car_id || form.contract_id) return 'Driver updated';
+      // A car picked on Edit driver is assigned straight away.
+      if (!body.arrangement) throw new ApiError(422, 'Please fix the highlighted fields', { arrangement: 'Choose work & pay or daily hire' });
+      if (!body.hire_date) await api(`/drivers/${editing.id}`, { method: 'PUT', body: { hire_date: form.c_start_date } }).catch(() => {});
+      const c = await giveCar(editing.id, { ...form, c_type: body.arrangement });
+      return `${body.name || 'Driver'} updated and given ${c.reg_number}`;
+    }
     if (!body.arrangement && !form.contract_id) throw new ApiError(422, 'Please fix the highlighted fields', { arrangement: 'Choose work & pay or daily hire' });
     if (form.car_id && !body.hire_date) body.hire_date = form.c_start_date;
     if (form.car_id) form = { ...form, c_type: body.arrangement };
@@ -180,10 +195,13 @@ export const driversCfg = ({ money, user } = {}) => ({
       .filter(f => f.name !== 'c_type') // the arrangement question above decides this
       .map(f => ({
         ...f,
-        ...(f.name === 'car_id' ? { derive: v => { const car = cachedOption('vehicle', v); return car && car.manager_id ? { manager_id: car.manager_id } : {}; } } : {}),
-        showIf: form => !!form.__new && (!f.showIf || f.showIf(form)),
+        ...(f.name === 'car_id' ? { allowDriverId: form => form.id, derive: v => { const car = cachedOption('vehicle', v); return car && car.manager_id ? { manager_id: car.manager_id } : {}; } } : {}),
+        ...(f.name === 'car_heading' ? { hint: form => form.__new ? 'Pick a car to give this driver now, or leave it empty and do it later.' : 'This driver has no car yet. Pick one and click Save changes to assign it.' } : {}),
+        showIf: form => (!!form.__new || !form.contract_id) && (!f.showIf || f.showIf(form)),
       })),
-    { name: 'details_heading', type: 'heading', label: 'Licence and other details', showIf: form => !!form.__new },
+    { name: 'current_car', type: 'heading', label: 'Car', showIf: form => !form.__new && !!form.contract_id,
+      hint: form => `Driving ${form.reg_number || 'a car'}. To give a different car, first stop the current contract on the driver's Contracts tab.` },
+    { name: 'details_heading', type: 'heading', label: 'Licence and other details' },
     { name: 'id_number', label: 'Ghana Card number', type: 'ghanacard', hint: 'Format GHA-XXXXXXXXX-X. Type the 10 digits; the rest is added for you' },
     { name: 'license_number', label: 'Licence number' },
     { name: 'license_class', label: 'Licence class' },

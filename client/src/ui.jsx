@@ -178,7 +178,7 @@ export function Field({ f, value, onChange, error, form }) {
       input = <PayCarPick {...common} value={value} onChange={onChange} />;
       break;
     case 'carpick':
-      input = <CarPick {...common} value={value} onChange={onChange} allowDriverId={f.allowDriverId} />;
+      input = <CarPick {...common} value={value} onChange={onChange} allowDriverId={typeof f.allowDriverId === 'function' ? f.allowDriverId(form || {}) : f.allowDriverId} />;
       break;
     case 'vehicle': case 'driver': case 'schedule': case 'contract': case 'manager':
       input = <RefSelect {...common} kind={f.type} value={value} onChange={onChange} filterVehicle={form?.vehicle_id} onlyManager={f.onlyManager} onlyFree={f.onlyFree} />;
@@ -192,7 +192,7 @@ export function Field({ f, value, onChange, error, form }) {
     case 'hidden':
       return null;
     case 'heading':
-      return <div className="form-heading span-2"><h3>{f.label}</h3>{f.hint && <small className="hint">{f.hint}</small>}</div>;
+      return <div className="form-heading span-2"><h3>{f.label}</h3>{f.hint && <small className="hint">{typeof f.hint === 'function' ? f.hint(form || {}) : f.hint}</small>}</div>;
     case 'textarea':
       input = <textarea {...common} rows={3} value={value ?? ''} onChange={e => onChange(e.target.value)} />;
       break;
@@ -389,7 +389,7 @@ export function ResourceTable({ cfg, fixed: fixedProp = NO_FIXED, embedded = fal
         <Modal title={editing.id ? `Edit ${cfg.singular.toLowerCase()}` : (cfg.addLabel || `Add ${cfg.singular.toLowerCase()}`)} onClose={() => setEditing(null)} wide={fields.length > 8}>
           <RecordForm
             fields={fields}
-            initial={editing.id ? { ...pick(editing, cfg.fields), __editing: true } : { ...(cfg.defaults?.() || {}), ...fixed }}
+            initial={editing.id ? { ...pick(editing, cfg.fields), ...(cfg.editExtras ? cfg.editExtras(editing) : {}), __editing: true } : { ...(cfg.defaults?.() || {}), ...fixed }}
             onSubmit={f => save({ ...f, ...fixed })}
             onCancel={() => setEditing(null)}
             submitLabel={editing.id ? 'Save changes' : (cfg.addLabel || `Add ${cfg.singular.toLowerCase()}`)}
