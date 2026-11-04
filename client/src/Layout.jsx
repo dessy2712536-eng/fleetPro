@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useApp } from './context';
-import { Brand } from './ui';
+import { Brand, useScrollLock } from './ui';
 import { api } from './api';
 
 const NAV = [
@@ -27,6 +27,7 @@ export default function Layout() {
   const { user, logout, settings, toast } = useApp();
   const [alertCount, setAlertCount] = useState(null);
   const [open, setOpen] = useState(false);
+  useScrollLock(open); // phone/iPad menu: scroll the menu, not the page behind it
   const loc = useLocation();
 
   useEffect(() => {

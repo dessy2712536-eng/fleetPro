@@ -4,6 +4,9 @@ const assert = require('node:assert/strict');
 const { loadBackend } = require('./emulator');
 
 const { ctx, book, call } = loadBackend();
+// Pretend it's after 9pm, so yesterday's work already counts as owed (the 9pm rule has its own test).
+const setHour = h => require('vm').runInContext(`nowHour = () => ${h};`, ctx);
+setHour(22);
 // Forget which tabs were checked, as a fresh Apps Script run would.
 const freshRun = () => require('vm').runInContext('Object.keys(_checked).forEach(k => delete _checked[k]);', ctx);
 ctx.setup();
@@ -120,11 +123,9 @@ test('work & pay contract: deposit rules, arrears, MoMo references, handover', (
   const start = addDays(today(), -14);
   const base = { driver_id: drv.id, vehicle_id: car.id, type: 'work_and_pay', start_date: start, status: 'active', deposit_reference: 'DEP001' };
 
-  // New car needs 15,000; below minimum rejected; reference required
-  let r = as(admin, 'POST', '/contracts', { body: { ...base, deposit_amount: 4000 } });
-  assert.equal(r.status, 422); assert.ok(r.details.deposit_amount);
-  r = as(admin, 'POST', '/contracts', { body: { ...base, deposit_amount: 8000 } });
-  assert.equal(r.status, 422); assert.match(r.details.vehicle_id, /new car/);
+  // A deposit is optional, but one that was paid needs its reference
+  const r = as(admin, 'POST', '/contracts', { body: { ...base, deposit_amount: 4000, deposit_reference: null } });
+  assert.equal(r.status, 422); assert.ok(r.details.deposit_reference);
   const c = ok(as(mtok, 'POST', '/contracts', { body: { ...base, deposit_amount: 15000 } }));
   assert.equal(c.daily_rate, 400);
   assert.equal(c.end_date, addDays(ctx.addYears(start, 4), -1));
@@ -292,8 +293,6 @@ test('cars start new; become retrieved for the next different driver', () => {
   const a = ok(as(admin, 'POST', '/drivers', { body: { name: 'First Owner', status: 'active', manager_id: 1 } }));
   const b = ok(as(admin, 'POST', '/drivers', { body: { name: 'Second Owner', status: 'active', manager_id: 1 } }));
   const base = { vehicle_id: car.id, type: 'work_and_pay', start_date: ctx.today(), status: 'active' };
-  // brand-new car: 8,000 is not enough
-  assert.match(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: a.id, deposit_amount: 8000, deposit_reference: 'NR-D1' } }).details.vehicle_id, /new car/);
   const c1 = ok(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: a.id, deposit_amount: Number(st.deposit_new_car), deposit_reference: 'NR-D1' } }));
   assert.equal(c1.car_condition, 'new');
   let v = ok(as(admin, 'GET', `/vehicles/${car.id}`));
@@ -303,10 +302,12 @@ test('cars start new; become retrieved for the next different driver', () => {
   assert.equal(v.condition, 'retrieved');
   // the same driver taking their own car back is not a retrieved car
   ok(as(admin, 'PUT', `/drivers/${a.id}`, { body: { status: 'active' } }));
-  assert.match(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: a.id, deposit_amount: 8000, deposit_reference: 'NR-D2' } }).details.vehicle_id, /new car/);
+  const again = ok(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: a.id, deposit_amount: 8000, deposit_reference: 'NR-D2' } }));
+  assert.equal(again.car_condition, 'new'); assert.equal(again.deposit_owed, Number(st.deposit_new_car) - 8000, 'part deposit: the rest is owed');
+  ok(as(admin, 'PUT', `/contracts/${again.id}`, { body: { status: 'stopped', end_reason: 'Left again' } }));
   // a different driver gets it as retrieved
   const c2 = ok(as(admin, 'POST', '/contracts', { body: { ...base, driver_id: b.id, deposit_amount: 8000, deposit_reference: 'NR-D3' } }));
-  assert.equal(c2.car_condition, 'retrieved');
+  assert.equal(c2.car_condition, 'retrieved'); assert.equal(c2.deposit_owed, 0);
   assert.equal(ok(as(admin, 'GET', '/vehicles', { query: { condition: 'retrieved', limit: 500 } })).rows.some(x => x.id === car.id), true);
 });
 
@@ -314,10 +315,37 @@ test('existing drivers keep the deposit they actually paid', () => {
   const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'EX-1', make: 'Livan', model: 'X3 Pro', type: 'car', fuel_type: 'petrol', status: 'active' } }));
   const d = ok(as(admin, 'POST', '/drivers', { body: { name: 'Old Hand', status: 'active', manager_id: 1 } }));
   const base = { driver_id: d.id, vehicle_id: car.id, type: 'work_and_pay', start_date: '2026-06-01', status: 'active', deposit_amount: 8000, deposit_reference: 'EX-D1' };
-  assert.equal(as(admin, 'POST', '/contracts', { body: { ...base, onboarding: 'new_driver' } }).status, 422);
-  assert.equal(as(admin, 'POST', '/contracts', { body: { ...base, onboarding: 'existing_driver', deposit_amount: 4000 } }).status, 422, 'still at least the minimum');
   const c = ok(as(admin, 'POST', '/contracts', { body: { ...base, onboarding: 'existing_driver' } }));
-  assert.equal(c.onboarding, 'existing_driver');
+  assert.equal(c.onboarding, 'existing_driver'); assert.equal(c.deposit_owed, 0);
+});
+
+test('drivers can start without paying the security deposit; it shows as owed', () => {
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'ND-1', make: 'Livan', model: 'X3 Pro', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  const d = ok(as(admin, 'POST', '/drivers', { body: { name: 'No Deposit', status: 'active', manager_id: 1 } }));
+  const c = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d.id, vehicle_id: car.id, type: 'work_and_pay', start_date: ctx.today(), status: 'active' } }));
+  assert.equal(c.deposit_owed, 15000);
+  freshRun();
+  assert.ok(ok(as(admin, 'GET', '/alerts')).alerts.some(a => a.kind === 'deposit_owed' && a.driver_id === d.id));
+  ok(as(admin, 'PUT', `/contracts/${c.id}`, { body: { deposit_amount: 15000, deposit_reference: 'ND-DEP' } }));
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).deposit_owed, 0);
+});
+
+test('a day becomes debt at 9pm the day after the work', () => {
+  const car = ok(as(admin, 'POST', '/vehicles', { body: { manager_id: 1, reg_number: 'NINE-1', make: 'Livan', model: 'X3 Pro', type: 'car', fuel_type: 'petrol', status: 'active' } }));
+  const d = ok(as(admin, 'POST', '/drivers', { body: { name: 'Nine PM', status: 'active', manager_id: 1 } }));
+  const start = ctx.addDays(ctx.today(), -2);
+  const c = ok(as(admin, 'POST', '/contracts', { body: { driver_id: d.id, vehicle_id: car.id, type: 'work_and_pay', start_date: start, status: 'active', deposit_amount: 15000, deposit_reference: 'NINE-D' } }));
+  const payDaysIn = to => [start, ctx.addDays(start, 1)].filter(x => x <= to && new Date(x + 'T00:00:00Z').getUTCDay() !== 0).length;
+  setHour(20);
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).arrears, 400 * payDaysIn(start), 'before 9pm, yesterday is not owed yet');
+  const y = ctx.addDays(start, 1);
+  if (new Date(y + 'T00:00:00Z').getUTCDay() !== 0) {
+    ok(as(admin, 'POST', '/payments', { body: { contract_id: c.id, type: 'daily', work_date: y, paid_on: ctx.today(), amount: 400, momo_reference: 'NINE-P1' } }));
+    assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).arrears, 400 * payDaysIn(start), 'paying early does not put the driver ahead');
+  }
+  setHour(21);
+  assert.equal(ok(as(admin, 'GET', `/contracts/${c.id}`)).arrears, 400 * payDaysIn(ctx.addDays(start, 1)) - (new Date(y + 'T00:00:00Z').getUTCDay() !== 0 ? 400 : 0), 'from 9pm, yesterday is a debt');
+  setHour(22);
 });
 
 test('CASH can be used as the reference more than once', () => {
@@ -493,7 +521,9 @@ test('managers only see and change their own group', () => {
   assert.equal(as(ta, 'GET', `/vehicles/${carB.id}`).status, 404);
   assert.equal(as(ta, 'GET', `/drivers/${drvB.id}`).status, 404);
   assert.equal(as(ta, 'PUT', `/vehicles/${carB.id}`, { body: { color: 'Red' } }).status, 404);
-  assert.equal(as(ta, 'DELETE', `/drivers/${drvB.id}`).status, 404);
+  assert.equal(as(ta, 'DELETE', `/drivers/${drvB.id}`).status, 403);
+  assert.equal(as(ta, 'DELETE', `/drivers/${drvA.id}`).status, 403, 'managers cannot delete even their own records');
+  assert.equal(as(ta, 'DELETE', `/vehicles/${carA.id}`).status, 403);
   assert.equal(as(ta, 'GET', `/vehicles/${carB.id}/summary`).status, 404);
 
   // can't move own car to another manager, or create a car for someone else

@@ -65,7 +65,32 @@ export function ExpiryCell({ date }) {
   return <span className={tone ? `txt-${tone}` : ''} title={days < 0 ? `Expired ${-days} days ago` : `${days} days left`}>{fmtDate(date)}</span>;
 }
 
+/**
+ * While a menu or pop-up is open, the page behind it stays still: only the menu/pop-up scrolls.
+ * Works on laptops, iPads and phones (iOS Safari ignores overflow:hidden on body, so the body is pinned in place).
+ */
+let locks = 0, savedY = 0;
+export function useScrollLock(active = true) {
+  useEffect(() => {
+    if (!active) return undefined;
+    if (locks++ === 0) {
+      savedY = window.scrollY;
+      const b = document.body.style;
+      const gap = window.innerWidth - document.documentElement.clientWidth; // stop the page jumping when the scrollbar hides
+      Object.assign(b, { position: 'fixed', top: `-${savedY}px`, left: '0', right: '0', width: '100%', overflow: 'hidden', paddingRight: gap > 0 ? `${gap}px` : '' });
+    }
+    return () => {
+      if (--locks === 0) {
+        const b = document.body.style;
+        Object.assign(b, { position: '', top: '', left: '', right: '', width: '', overflow: '', paddingRight: '' });
+        window.scrollTo(0, savedY);
+      }
+    };
+  }, [active]);
+}
+
 export function Modal({ title, onClose, children, wide }) {
+  useScrollLock(true);
   useEffect(() => {
     const k = e => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', k);
@@ -409,7 +434,7 @@ export function ResourceTable({ cfg, fixed: fixedProp = NO_FIXED, embedded = fal
             onCancel={() => setEditing(null)}
             submitLabel={editing.id ? 'Save changes' : (cfg.addLabel || `Add ${cfg.singular.toLowerCase()}`)}
           />
-          {editing.id && (
+          {editing.id && can('admin') && (
             <div className="danger-zone"><button className="link-btn danger" onClick={() => remove(editing)}>Delete this {cfg.singular.toLowerCase()}</button></div>
           )}
         </Modal>

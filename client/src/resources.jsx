@@ -58,10 +58,11 @@ const isEV = make => /cerio|cireo|byd/i.test(make || '');
 /** Form fields for picking a car and the contract that goes with it. */
 /** New cars need the full new-car deposit; a car that has had a driver before is retrieved and needs less. */
 function depositHint(car) {
-  if (!car || !car.next_condition) return '5,000–10,000: retrieved car · 15,000: new car';
-  return car.next_condition === 'new'
-    ? 'New car (never had a driver): needs the full 15,000 deposit'
-    : 'Retrieved car (has had a driver before): deposit from 5,000';
+  const later = ' Leave empty if not paid yet – the driver can still start, and what is owed shows in Alerts.';
+  if (!car || !car.next_condition) return '5,000–10,000: retrieved car · 15,000: new car.' + later;
+  return (car.next_condition === 'new'
+    ? 'New car (never had a driver): the deposit is 15,000.'
+    : 'Retrieved car (has had a driver before): deposit from 5,000.') + later;
 }
 
 export const carFields = ({ withHeading = true } = {}) => [
@@ -78,9 +79,9 @@ export const carFields = ({ withHeading = true } = {}) => [
     hint: f => f.c_onboarding === 'existing_driver' ? 'Already driving for you before FleetPro: enter their start date, deposit and what they have paid so far' : 'Starting now, with nothing paid yet' },
   { name: 'c_paid_so_far', label: 'Total paid so far', type: 'number', showIf: f => hasCar(f) && f.c_onboarding === 'existing_driver', hint: 'All their daily payments up to yesterday, so they don\'t show as owing for days already paid' },
   { name: 'c_daily_rate', label: 'Daily payment', type: 'number', showIf: hasCar, hint: 'Leave empty for the standard rate (400 work & pay, Cerio 500, BYD 700)' },
-  { name: 'c_deposit_amount', label: 'Security deposit', type: 'number', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay', hint: f => f.c_onboarding === 'existing_driver' ? 'The deposit they paid when they started (at least 5,000)' : depositHint(cachedOption('vehicle', f.car_id)) },
-  { name: 'c_deposit_reference', label: 'Deposit MoMo reference', hint: 'MoMo transaction ID, or CASH if paid in cash', required: true, showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
-  { name: 'c_deposit_date', label: 'Deposit paid on', type: 'date', showIf: f => hasCar(f) && f.c_type === 'work_and_pay' },
+  { name: 'c_deposit_amount', label: 'Security deposit paid', type: 'number', showIf: f => hasCar(f) && f.c_type === 'work_and_pay', hint: f => f.c_onboarding === 'existing_driver' ? 'The deposit they paid when they started (at least 5,000)' : depositHint(cachedOption('vehicle', f.car_id)) },
+  { name: 'c_deposit_reference', label: 'Deposit MoMo reference', hint: 'MoMo transaction ID, or CASH if paid in cash. Needed only when a deposit was paid.', showIf: f => hasCar(f) && f.c_type === 'work_and_pay' && Number(f.c_deposit_amount) > 0 },
+  { name: 'c_deposit_date', label: 'Deposit paid on', type: 'date', showIf: f => hasCar(f) && f.c_type === 'work_and_pay' && Number(f.c_deposit_amount) > 0 },
 ];
 export const carDefaults = () => ({ c_type: 'work_and_pay', c_onboarding: 'new_driver', c_start_date: todayStr(), c_deposit_date: todayStr() });
 
@@ -95,8 +96,9 @@ export async function giveCar(driverId, f) {
     contract = await api('/contracts', { method: 'POST', body: {
       driver_id: driverId, vehicle_id: f.car_id, type: f.c_type, status: 'active', start_date: f.c_start_date,
       daily_rate: f.c_daily_rate || null, payment_days: 'mon_sat',
-      deposit_amount: isWP ? f.c_deposit_amount : null, deposit_reference: isWP ? f.c_deposit_reference : null,
-      deposit_date: isWP ? (f.c_deposit_date || f.c_start_date) : null,
+      deposit_amount: isWP && Number(f.c_deposit_amount) > 0 ? f.c_deposit_amount : null,
+      deposit_reference: isWP && Number(f.c_deposit_amount) > 0 ? f.c_deposit_reference : null,
+      deposit_date: isWP && Number(f.c_deposit_amount) > 0 ? (f.c_deposit_date || f.c_start_date) : null,
       onboarding: f.c_onboarding || 'new_driver',
     } });
   } catch (e) {
@@ -252,7 +254,7 @@ export const contractsCfg = ({ money, user }) => ({
     { key: 'reg_number', label: 'Car', hideIn: 'vehicle_id', render: r => <><Plate to={`/vehicles/${r.vehicle_id}`}>{r.reg_number}</Plate><div className="dim">{r.make} {r.model}{r.car_condition ? ` · ${r.car_condition}` : ''}</div></> },
     { key: 'type', label: 'Type', render: r => <><Badge value={r.type} /><div className="dim">{money(r.daily_rate)}/day · {human(r.payment_days)}</div></> },
     { key: 'start_date', label: 'Term', sort: 'start_date', render: r => <>{fmtDate(r.start_date)}<div className="dim">{r.ended_on ? `Ended ${fmtDate(r.ended_on)}` : r.end_date ? `to ${fmtDate(r.end_date)}` : 'Ongoing'}</div></> },
-    { key: 'deposit_amount', label: 'Deposit', num: true, render: r => r.deposit_amount ? <>{money(r.deposit_amount)}<div className="dim">{r.deposit_reference}</div></> : <span className="dim">—</span> },
+    { key: 'deposit_amount', label: 'Deposit', num: true, render: r => <>{r.deposit_amount ? <>{money(r.deposit_amount)}<div className="dim">{r.deposit_reference}</div></> : <span className="dim">—</span>}{r.deposit_owed > 0 && <div className="txt-warn small">{money(r.deposit_owed)} owed</div>}</> },
     { key: 'arrears', label: 'Owing', num: true, sort: 'arrears', render: r => <Owing r={r} money={money} /> },
     { key: 'remaining_balance', label: 'Car balance', num: true, sort: 'remaining_balance', render: r => r.remaining_balance == null ? <span className="dim">Daily hire</span> : <>{money(r.remaining_balance)}<div className="progress" title={`${r.progress}% paid`}><span style={{ width: `${r.progress}%` }} /></div></> },
     { key: 'status', label: 'Status', sort: 'status', render: r => <Badge value={r.status} /> },
@@ -272,7 +274,7 @@ export const contractsCfg = ({ money, user }) => ({
     { name: 'daily_rate', label: 'Daily payment', type: 'number', hint: 'Leave empty for the standard rate (400 work & pay, Cerio 500, BYD 700)' },
     { name: 'payment_days', label: 'Pays on', type: 'select', options: ['mon_sat', 'every_day'], required: true },
     { name: 'total_price', label: 'Car price (total to own)', type: 'number', showIf: f => f.type === 'work_and_pay', hint: 'Leave empty to use the price in Settings → Car prices (Livan X3 Pro: 500,000)' },
-    { name: 'deposit_amount', label: 'Security deposit', type: 'number', showIf: f => f.type === 'work_and_pay' || f.deposit_amount,
+    { name: 'deposit_amount', label: 'Security deposit paid', type: 'number', showIf: f => f.type === 'work_and_pay' || f.deposit_amount,
       hint: f => f.onboarding === 'existing_driver' ? 'The deposit they paid when they started (at least 5,000)' : depositHint(cachedOption('vehicle', f.vehicle_id)) },
     { name: 'deposit_reference', label: 'Deposit MoMo reference', hint: 'MoMo transaction ID, or CASH if paid in cash', showIf: f => f.type === 'work_and_pay' || f.deposit_amount },
     { name: 'deposit_date', label: 'Deposit paid on', type: 'date', showIf: f => f.type === 'work_and_pay' || f.deposit_amount },

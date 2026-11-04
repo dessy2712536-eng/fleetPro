@@ -393,3 +393,19 @@ tr.row-short td:first-child { box-shadow: inset 3px 0 0 var(--bad); }
 .logo-actions { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: 520px; }
 .sidebar .brand.has-logo { align-items: center; }
 .sidebar .brand-name, .topbar .brand-name { white-space: normal; overflow: visible; font-size: 19px; line-height: 1.1; overflow-wrap: anywhere; }
+
+/* ---------- Menus and pop-ups scroll on their own (laptop, iPad, phone) ---------- */
+.sidebar { height: 100vh; height: 100dvh; }
+.sidebar nav { min-height: 0; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.modal-backdrop { overscroll-behavior: contain; touch-action: none; }
+.modal { max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+.modal-backdrop .modal * { touch-action: auto; }
+@media (max-width: 820px) {
+  .sidebar { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
+  .nav-open .scrim { touch-action: none; }
+}
+@media (max-width: 600px) {
+  /* Phones: pop-ups open as a full-height sheet so long forms fit and scroll inside */
+  .modal-backdrop { padding: 0; place-items: end stretch; }
+  .modal, .modal.wide { width: 100%; max-height: 100dvh; height: 100dvh; border-radius: 0; padding-bottom: env(safe-area-inset-bottom); }
+}

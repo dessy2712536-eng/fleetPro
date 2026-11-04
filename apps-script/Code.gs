@@ -556,8 +556,15 @@ const maxDate = function () { return Array.prototype.slice.call(arguments).filte
 /** Last day a contract is (or was) payable. */
 function contractLastDay(c) { return minDate(c.ended_on, c.end_date) || null; }
 
-/** Work days whose payment is due by now: a day's money is due the following day, so up to yesterday. */
-function dueThrough() { return addDays(today(), -1); }
+/**
+ * Work days whose money counts as owed (debt) by now. A day's money is due the day after the work, by 9pm.
+ * Before 9pm, yesterday's work isn't a debt yet; from 9pm it is.
+ */
+const DEBT_HOUR = 21;
+/** When a work day's money becomes a debt, e.g. "Tue 4 Nov, 9pm". */
+function debtFrom(workDate) { const d = addDays(workDate, 1); return { date: d, hour: DEBT_HOUR }; }
+function nowHour() { return Number(Utilities.formatDate(new Date(), tz(), 'HH')); }
+function dueThrough() { return addDays(today(), nowHour() >= DEBT_HOUR ? -1 : -2); }
 
 const MONEY_TYPES = { daily: 1, adjustment: 1 };
 
@@ -579,7 +586,16 @@ function contractStats(c, payments) {
   const waived = round(sum(payments.filter(p => p.type === 'waiver'), p => p.amount) + offs.filter(o => o.excused).length * (c.daily_rate || 0));
   const rate = c.daily_rate || 0;
   const dueDays = payDays(c.start_date, minDate(dueThrough(), contractLastDay(c)), c.payment_days);
-  const expected = round(dueDays * rate);
+  // Yesterday before 9pm isn't a debt yet: only what has already been paid for it counts as due,
+  // so an early payment doesn't make the driver look ahead.
+  let pendingDue = 0;
+  for (let d = addDays(dueThrough(), 1); d <= addDays(today(), -1); d = addDays(d, 1)) {
+    const last = contractLastDay(c);
+    if (d < c.start_date || (last && d > last) || !isPayDay(d, c.payment_days)) continue;
+    if (offDaysFor(c.id).some(o => o.excused && o.date === d)) continue;
+    pendingDue += Math.min(rate, sum(payments.filter(p => p.type === 'daily' && p.work_date === d), p => p.amount));
+  }
+  const expected = round(dueDays * rate + pendingDue);
   const arrears = round(expected - paid - waived);
   // Price to own the car: set on the contract, else the model's price (Settings → Car prices), else daily rate × every pay day in the term.
   const total = c.type !== 'work_and_pay' ? null
@@ -612,6 +628,14 @@ function contractStats(c, payments) {
  * Every car starts as NEW. Once it has been given to a driver, it becomes RETRIEVED for any
  * different driver who gets it after that. The same driver getting their own car back doesn't count.
  */
+/** Security deposit still to pay: new car → new-car deposit, retrieved car or existing driver → the minimum. */
+function depositOwed(c, retrieved) {
+  if (c.type !== 'work_and_pay') return 0;
+  const st = getSettings();
+  const expected = c.onboarding === 'existing_driver' || retrieved ? Number(st.deposit_min) || 0 : Number(st.deposit_new_car) || 0;
+  return round(Math.max(expected - (Number(c.deposit_amount) || 0), 0));
+}
+
 function isRetrievedCar(vehicleId, contractId, driverId) {
   return readAll('contracts').some(c => c.vehicle_id === vehicleId && c.id !== contractId
     && (!contractId || c.id < contractId) && (driverId == null || c.driver_id !== driverId));
@@ -665,7 +689,9 @@ const VIEWS = {
       driver_name: d.name, manager_id: d.manager_id || null, manager_name: m.u[d.manager_id] ? m.u[d.manager_id].name : null,
       batch: d.batch || null, reg_number: v.reg_number, make: v.make, model: v.model,
       car_condition: Object.keys(m.c).some(k => m.c[k].vehicle_id === r.vehicle_id && m.c[k].id < r.id && m.c[k].driver_id !== r.driver_id) ? 'retrieved' : 'new',
-    });
+    }, (o => ({ deposit_owed: depositOwed(r, o.car_condition === 'retrieved') }))({
+      car_condition: Object.keys(m.c).some(k => m.c[k].vehicle_id === r.vehicle_id && m.c[k].id < r.id && m.c[k].driver_id !== r.driver_id) ? 'retrieved' : 'new',
+    }));
   },
   off_days: (r, m) => {
     const c = m.c[r.contract_id] || {}, d = m.d[c.driver_id] || {}, v = m.v[c.vehicle_id] || {};
@@ -918,15 +944,9 @@ Object.assign(RESOURCES, {
           throw invalid('driver_id', `This car is in ${name(car.manager_id)}'s group but the driver is in ${name(drv.manager_id)}'s. Move one of them so they match.`);
         }
       }
-      if (d.type === 'work_and_pay') {
-        const min = Number(st.deposit_min) || 0, newCar = Number(st.deposit_new_car) || 0;
-        if (d.deposit_amount == null) throw invalid('deposit_amount', `Work & pay needs a security deposit (from ${money(min)})`);
-        if (d.deposit_amount < min) throw invalid('deposit_amount', `The minimum deposit is ${money(min)}`);
-        if (!d.deposit_reference) throw invalid('deposit_reference', 'Enter the MoMo reference for the deposit');
-        if (d.onboarding !== 'existing_driver' && !isRetrievedCar(d.vehicle_id, prev ? prev.id : null, d.driver_id) && d.deposit_amount < newCar) {
-          throw invalid('vehicle_id', `This is a new car: it needs a deposit of ${money(newCar)}. Deposits below that get a retrieved car.`);
-        }
-      }
+      // The security deposit is optional: a driver can start without it (or with part of it).
+      // What is still owed shows on the contract as deposit_owed and in Alerts.
+      if (d.deposit_amount > 0 && !d.deposit_reference) throw invalid('deposit_reference', 'Enter the MoMo reference for the deposit, or CASH');
       if (d.deposit_reference && !isCash(d.deposit_reference)) {
         const ref = String(d.deposit_reference).toLowerCase();
         const clash = readAll('payments').some(p => String(p.momo_reference || '').toLowerCase() === ref)
@@ -1173,7 +1193,8 @@ function save(res, id, body, user) {
 }
 
 function remove(res, id, user) {
-  requireRole(user, 'manager');
+  // Only admins delete. Managers can add and change records in their own group, never remove them.
+  if (user.role !== 'admin') throw new HttpError(403, 'Only an admin can delete records. Ask your admin to remove it.');
   const row = findById(res.table, id);
   if (!row) throw new HttpError(404, `${res.entity} not found`);
   const mid = scopeFor(user);
@@ -1265,6 +1286,14 @@ function computeAlerts() {
         title: `Owing ${money(st.arrears)} – ${d.name}`,
         severity: st.days_behind >= threshold * 2 ? 'overdue' : 'urgent',
         detail: `${st.days_behind} days of payments behind on ${v.reg_number}${st.last_payment_on ? ` · last paid ${st.last_payment_on}` : ' · no payments yet'}`,
+      });
+    }
+    const owedDeposit = depositOwed(c, Object.keys(m.c).some(k => m.c[k].vehicle_id === c.vehicle_id && m.c[k].id < c.id && m.c[k].driver_id !== c.driver_id));
+    if (owedDeposit > 0) {
+      alerts.push({
+        category: 'payment', kind: 'deposit_owed', driver_id: c.driver_id, vehicle_id: c.vehicle_id, subject: d.name, link: `/drivers/${c.driver_id}`,
+        title: `Deposit not fully paid – ${d.name}`, severity: daysBetween(c.start_date, now) > 14 ? 'urgent' : 'upcoming', due_date: c.start_date,
+        detail: `${money(owedDeposit)} of the security deposit still to pay on ${v.reg_number}`,
       });
     }
     if (c.type === 'work_and_pay' && c.end_date && c.end_date <= horizon) {
@@ -1405,7 +1434,7 @@ function managerReport(q, user) {
 /** Expected vs collected for each of the last N days (by work date). */
 function dailyCollections(days, managerId) {
   const m = maps();
-  const end = dueThrough();
+  const end = addDays(today(), -1); // yesterday's work shows even before its 9pm deadline
   const out = [];
   const contracts = readAll('contracts').filter(c => !managerId || inGroup('contracts', c, managerId, m));
   for (let i = days - 1; i >= 0; i--) {
@@ -1423,7 +1452,7 @@ function dailyCollections(days, managerId) {
 
 function collectionsSummary(managerId) {
   const m = maps();
-  const now = today(), yesterday = dueThrough();
+  const now = today(), yesterday = addDays(now, -1);
   const contracts = readAll('contracts').filter(c => !managerId || inGroup('contracts', c, managerId, m));
   const active = contracts.filter(c => c.status === 'active');
   const stats = active.map(c => Object.assign({ c }, contractStats(c, m.pay[c.id])));
@@ -1436,7 +1465,7 @@ function collectionsSummary(managerId) {
     }));
   return {
     collected_today: round(sum(payments.filter(p => p.paid_on === now), p => p.amount)),
-    yesterday: { date: yesterday, expected: yday.expected, collected: yday.collected, unpaid },
+    yesterday: { date: yesterday, expected: yday.expected, collected: yday.collected, unpaid, debt_from: debtFrom(yesterday), is_debt: dueThrough() >= yesterday },
     month_collected: round(sum(payments.filter(p => p.paid_on >= now.slice(0, 8) + '01'), p => p.amount)),
     arrears_total: round(sum(stats.filter(x => x.arrears > 0), x => x.arrears)),
     drivers_in_arrears: stats.filter(x => x.days_behind >= 1).length,

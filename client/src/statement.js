@@ -8,6 +8,15 @@ export const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const monthName = m => new Date(m + '-01T00:00:00Z').toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
 export const MONEY = { daily: 1, adjustment: 1 };
 
+/** A day's money is due the day after the work, by 9pm (Ghana time). Unpaid after that, it is a debt. */
+export const DEBT_HOUR = 21;
+export function dueThroughNow(now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Accra', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false })
+    .formatToParts(now).map(p => [p.type, p.value]));
+  const today = `${parts.year}-${parts.month}-${parts.day}`;
+  return addDays(today, Number(parts.hour) % 24 >= DEBT_HOUR ? -1 : -2);
+}
+
 /**
  * Builds the day-by-day statement for one contract.
  * - Every pay day from the start date to yesterday (drivers pay the day after they work) is due at the daily rate.
@@ -15,7 +24,7 @@ export const MONEY = { daily: 1, adjustment: 1 };
  * - A payment recorded for a day covers that day first. Anything extra (overpayments, money paid before
  *   FleetPro) then goes to the oldest days still unpaid. The total owing is the same either way.
  */
-export function buildStatement(contract, payments, todayStr, offDays = []) {
+export function buildStatement(contract, payments, todayStr, offDays = [], debtThrough = addDays(todayStr, -1)) {
   const rate = Number(contract.daily_rate) || 0;
   const yesterday = addDays(todayStr, -1);
   const lastWork = payments.map(p => p.work_date).filter(Boolean).sort().slice(-1)[0];
@@ -45,8 +54,11 @@ export function buildStatement(contract, payments, todayStr, offDays = []) {
     const pay = isPayDay(d, contract.payment_days);
     const recs = recorded[d] || [];
     if (!pay && !recs.length) continue; // Sundays only appear if something was recorded on them
-    const due = pay && !excused[d] && d <= yesterday ? rate : 0;
-    days.push({ date: d, due, pay, excused: excused[d] || null, off: off[d] || null, recs, recordedAmount: recs.reduce((n, p) => n + Number(p.amount), 0), future: d > yesterday });
+    // Yesterday, before 9pm: not a debt yet, so only what has already been paid for it counts as due.
+    const pending = pay && !excused[d] && d > debtThrough && d <= yesterday;
+    const own = recs.filter(p => p.type === 'daily').reduce((n, p) => n + Number(p.amount), 0);
+    const due = pending ? Math.min(rate, own) : pay && !excused[d] && d <= yesterday ? rate : 0;
+    days.push({ date: d, due, pay, pending, excused: excused[d] || null, off: off[d] || null, recs, recordedAmount: recs.reduce((n, p) => n + Number(p.amount), 0), future: d > yesterday });
   }
 
   // 1. Each day's own daily payments cover that day. 2. Extra money goes to the oldest unpaid days.
@@ -67,7 +79,7 @@ export function buildStatement(contract, payments, todayStr, offDays = []) {
     const covered = r.covered;
     coveredSoFar += covered;
     r.coveredSoFar = coveredSoFar;
-    r.status = r.excused ? 'excused' : r.due === 0 ? 'not_due' : covered >= r.due ? 'paid' : covered > 0 ? 'part' : r.off ? 'off_owed' : 'unpaid';
+    r.status = r.excused ? 'excused' : r.pending && covered < rate ? (covered > 0 ? 'part_tonight' : 'due_tonight') : r.due === 0 ? 'not_due' : covered >= r.due ? 'paid' : covered > 0 ? 'part' : r.off ? 'off_owed' : 'unpaid';
     dueSoFar += r.due;
     paidSoFar += r.recordedAmount;
     r.dueSoFar = dueSoFar;

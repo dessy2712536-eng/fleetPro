@@ -187,7 +187,7 @@ export function VehicleDetail() {
       {editing && (
         <Modal title={`Edit ${v.reg_number}`} onClose={() => setEditing(false)} wide>
           <RecordForm fields={cfg.fields} initial={Object.fromEntries(cfg.fields.map(f => [f.name, v[f.name]]))} onSubmit={save} onCancel={() => setEditing(false)} submitLabel="Save changes" />
-          <div className="danger-zone"><button className="link-btn danger" onClick={remove}>Delete this vehicle</button></div>
+          {app.can('admin') && <div className="danger-zone"><button className="link-btn danger" onClick={remove}>Delete this vehicle</button></div>}
         </Modal>
       )}
     </>
@@ -263,7 +263,7 @@ export function DriverDetail() {
             <div><dt>Arrangement</dt><dd>{human(contract.type)} · {money(contract.daily_rate)}/day <span className="dim">({human(contract.payment_days)})</span></dd></div>
             <div><dt>Started</dt><dd>{fmtDate(contract.start_date)}{contract.car_condition ? <span className="dim"> · {contract.car_condition} car</span> : ''}</dd></div>
             <div><dt>Ends</dt><dd>{contract.end_date ? fmtDate(contract.end_date) : 'Ongoing'}</dd></div>
-            <div><dt>Deposit</dt><dd>{contract.deposit_amount ? <>{money(contract.deposit_amount)} <span className="dim mono">{contract.deposit_reference}</span></> : '—'}</dd></div>
+            <div><dt>Deposit</dt><dd>{contract.deposit_amount ? <>{money(contract.deposit_amount)} <span className="dim mono">{contract.deposit_reference}</span></> : 'Not paid'}{contract.deposit_owed > 0 && <div className="txt-warn small">{money(contract.deposit_owed)} still owed</div>}</dd></div>
             <div><dt>MoMo number</dt><dd>{d.momo_number || '—'}</dd></div>
             <div><dt>Ghana Card</dt><dd>{d.id_number || '—'}</dd></div>
             <div><dt>Last paid</dt><dd>{contract.last_payment_on ? fmtDate(contract.last_payment_on) : 'No payments yet'}</dd></div>
@@ -301,7 +301,7 @@ export function DriverDetail() {
       {editing && (
         <Modal title={`Edit ${d.name}`} onClose={() => setEditing(false)} wide>
           <RecordForm fields={cfg.fields} initial={{ ...Object.fromEntries(cfg.fields.map(f => [f.name, d[f.name]])), ...cfg.editExtras(d) }} onSubmit={save} onCancel={() => setEditing(false)} submitLabel="Save changes" />
-          <div className="danger-zone"><button className="link-btn danger" onClick={remove}>Delete this driver</button></div>
+          {app.can('admin') && <div className="danger-zone"><button className="link-btn danger" onClick={remove}>Delete this driver</button></div>}
         </Modal>
       )}
       {quick === 'car' && (

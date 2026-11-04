@@ -41,7 +41,7 @@ export async function downloadDriverTemplate() {
     ['2. Only the driver name is required. Phone numbers: type them with the leading 0, e.g. 0244123456. Ghana Card: GHA-XXXXXXXXX-X, e.g. GHA-123456789-0.'],
     ['3. To give the driver a car at the same time, fill in Car number, Arrangement and Start date. The car must already be in FleetPro (Cars → Import cars).'],
     ['4. Arrangement: "Work & pay" (daily payments for 4 years, driver owns the car) or "Daily hire" (e.g. Cerio, BYD). Leave Daily payment empty for the standard rate.'],
-    ['5. Work & pay needs the Deposit amount and the Deposit MoMo reference. New cars need the full new-car deposit (15,000); retrieved cars from 5,000.'],
+    ['5. Deposit: fill in the amount paid and its MoMo reference (or CASH). Leave both empty if the driver has not paid yet – what is still owed shows in Alerts. New cars: 15,000; retrieved cars: from 5,000.'],
     ['6. Total paid so far: for drivers who started before FleetPro, the total of their daily payments up to yesterday. This stops them showing as owing for days they already paid.'],
     ['7. Dates: type them as 31/12/2026 (day/month/year).'],
     ['8. Save the file, then in FleetPro go to Drivers → Import drivers → Upload the filled-in file. Drivers already in FleetPro (same phone number) are not added twice.'],
@@ -122,7 +122,7 @@ const yesterday = () => { const d = new Date(); d.setDate(d.getDate() - 1); retu
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function ImportDrivers({ onClose, onDone }) {
-  const { user, money: fmtMoney, settings } = useApp();
+  const { user, money: fmtMoney } = useApp();
   const managers = useOptions('manager');
   const [managerId, setManagerId] = useState(user.role === 'manager' ? String(user.id) : '');
   const [text, setText] = useState('');
@@ -139,7 +139,6 @@ export default function ImportDrivers({ onClose, onDone }) {
       .catch(() => setCtx({ cars: new Map(), drivers: [] }));
   }, [text, fileRows, ctx]);
 
-  const minDeposit = Number(settings.deposit_min) || 5000;
   const findManager = name => managers.find(m => m.label.trim().toLowerCase() === name.trim().toLowerCase());
   const carsSeen = new Map(), refsSeen = new Map(), phonesSeen = new Map(), cardsSeen = new Map();
   const checked = rows.map(r => {
@@ -172,9 +171,8 @@ export default function ImportDrivers({ onClose, onDone }) {
       carsSeen.set(carKey(r.car), 1);
       if (!r.start_date) problems.push('Needs a start date');
       if (r.type === 'work_and_pay') {
-        if (r.deposit_amount == null) problems.push('Needs the deposit amount');
-        else if (r.deposit_amount < minDeposit) problems.push(`Deposit below ${fmtMoney(minDeposit)}`);
-        if (!r.deposit_reference) problems.push('Needs the deposit MoMo reference');
+        // The deposit is optional (what is still owed shows in Alerts), but a paid deposit needs its reference.
+        if (r.deposit_amount > 0 && !r.deposit_reference) problems.push('Needs the deposit MoMo reference (or CASH)');
       }
       if (r.deposit_reference) {
         const k = r.deposit_reference.toLowerCase();
